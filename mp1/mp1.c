@@ -15,10 +15,10 @@ static struct timer_list timer;
 void
 timer_handler(unsigned long data)
 {
-	printk (KERN_ALERT "TIMER RUN!!!" );
+    printk (KERN_ALERT "TIMER RUN!!!" );
 
-	setup_timer ( &timer, timer_handler, 0);
-	mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
+    setup_timer ( &timer, timer_handler, 0);
+    mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
 }
 
 int
@@ -32,24 +32,25 @@ procfile_read(
    )
 {
     //TODO
+    return 0;
 }
 
 int __init
 my_module_init(void)
 {
     printk(KERN_ALERT "MODULE LOADED\n");
-    proc_file_g = create_proc_entry(procfs_name, 0666, NULL);
+    proc_file_g = create_proc_entry(PROCFS_NAME, 0666, NULL);
 
     if(proc_file_g == NULL)
     {
-        remove_proc_entry(PROCFS_NAME, &proc_root);
+        remove_proc_entry(PROCFS_NAME, NULL);
         printk(KERN_ALERT "Error: Could not initialize /proc/%s\n", PROCFS_NAME);
         return -ENOMEM;
     }
 
     //TODO - figure out why this needs to happen?
     proc_file_g->read_proc = procfile_read;
-    proc_file_g->owner = THIS_MODULE;
+    //proc_file_g->owner = THIS_MODULE;
     proc_file_g->mode = S_IFREG | S_IRUGO;
     proc_file_g->uid = 0;
     proc_file_g->gid = 0;
@@ -67,7 +68,7 @@ my_module_init(void)
 void __exit
 my_module_exit(void)
 {
-    remove_proc_entry(PROCFS_NAME, &proc_root);
+    remove_proc_entry(PROCFS_NAME, NULL);
     del_timer ( &timer );
     printk(KERN_ALERT "MODULE UNLOADED\n");
 }

@@ -12,4 +12,8 @@
 *.la
 *.a
 
+*.mp1.*
+*.tmp_versions
+modules.order
+
 test
