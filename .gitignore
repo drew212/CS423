@@ -15,5 +15,7 @@
 *.mp1.*
 *.tmp_versions
 modules.order
+mp1.mod.c
+Module.symvers
 
 test
