@@ -4,14 +4,21 @@
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
 #include <linux/timer.h>
+#include <asm/uaccess.h>
 
 #define PROC_DIR_NAME "mp1"
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
+#define FULL_PROC "status/mp1"
+#define THREAD_NAME "mp1_task_thread"
 
+struct proc_dir_entry* mp1_proc_dir_g;
 struct proc_dir_entry* proc_file_g;
 
+struct semaphore thread_sem;
+
 static struct timer_list timer;
+struct task_struct * thread;
 
 struct proc_dir_entry* mp1_proc_dir_g;
 static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
@@ -73,17 +80,18 @@ get_process_times(char ** process_times){
 }
 
 
-
-
 void
 timer_handler(unsigned long data)
 {
-    printk (KERN_ALERT "TIMER RUN!!!" );
+    printk (KERN_INFO "TIMER RUN!!!" );
 
     setup_timer(&timer, timer_handler, 0);
     mod_timer(&timer, jiffies + msecs_to_jiffies (5000));
 }
 
+/*
+ * This function reads from the proc file and fills the buffer
+ */
 int
 procfile_read(
     char * buffer,
@@ -94,40 +102,49 @@ procfile_read(
     void * data
     )
 {
+    int ret;
     if (offset > 0) {
-		/* we have finished to read, return 0 */
-		ret  = 0;
-	} else {
-		/* fill the buffer, return the buffer size */
-		copy_to_user(buffer, procfs_buffer, procfs_buffer_size);
-		printf(getpid(),":",jiffies);
-		ret = procfs_buffer_size;
-	}
-
-//TODO    
+        /* we have finished to read, return 0 */
+        ret  = 0;
+    } else {
+        /* fill the buffer, return the buffer size */
+        int nbytes = copy_to_user(buffer, procfs_buffer, procfs_buffer_size);
+        if(nbytes > 0)
+        {
+            printk(KERN_ALERT "procfile_read copy_to_user failed!\n");
+        }
+        ret = procfs_buffer_size;
+    }
+    return ret;
 }
-int procfile_write(struct file *file, const char *buffer, unsigned long count,
-		   void *data)
+
+int
+procfile_write(
+    struct file *file,
+    const char *buffer,
+    unsigned long count,
+    void *data
+    )
 {
-	/* get buffer size */
-	procfs_buffer_size = count;
-	if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
-		procfs_buffer_size = PROCFS_MAX_SIZE;
-	}
-	
-	/* write data to the buffer */
-	if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
-		return -EFAULT;
-	}
-	
-	return procfs_buffer_size;
+    /* get buffer size */
+    procfs_buffer_size = count;
+    if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
+        procfs_buffer_size = PROCFS_MAX_SIZE;
+    }
+
+    /* write data to the buffer */
+    if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+        return -EFAULT;
+    }
+
+    return procfs_buffer_size;
 }
 
 
 int __init
 my_module_init(void)
 {
-    printk(KERN_ALERT "MODULE LOADED\n");
+    printk(KERN_INFO "MODULE LOADED\n");
 
     mp1_proc_dir_g = proc_mkdir(PROC_DIR_NAME, NULL);
     proc_file_g = create_proc_entry(PROCFS_NAME, 0666, mp1_proc_dir_g);
@@ -135,7 +152,7 @@ my_module_init(void)
     if(proc_file_g == NULL)
     {
         remove_proc_entry(PROCFS_NAME, mp1_proc_dir_g);
-        printk(KERN_ALERT "Error: Could not initialize /proc/%s\n", PROCFS_NAME);
+        printk(KERN_ALERT "Error: Could not initialize /proc/%s\n", FULL_PROC);
         return -ENOMEM;
     }
 
@@ -162,8 +179,39 @@ my_module_exit(void)
     remove_proc_entry(PROC_DIR_NAME, NULL);
 
     del_timer ( &timer );
-    printk(KERN_ALERT "MODULE UNLOADED\n");
+    printk(KERN_INFO "MODULE UNLOADED\n");
 }
+
+/*
+ * Starts the kernel thread
+ */
+//TODO This should be static
+void
+start_kthread(void)
+{
+    //TODO
+    //task_struct = kthread_create(int(* thread_fucntion)(void* data),  NULL, THREAD_NAME);
+}
+
+/*
+ * Stops the kernel thread
+ */
+void
+stop_kthread(void)
+{
+    //TODO
+}
+
+/*
+ * This is the function that executes when the thread is run.
+ */
+int
+thread_function(void * data)
+{
+    //TODO
+    return 0;
+}
+
 
 module_init(my_module_init);
 module_exit(my_module_exit);
