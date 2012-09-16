@@ -3,9 +3,11 @@
 void main()
 {
     int pid = getpid();
-    FILE* proc = fopen("/proc/mp1/status", "a+");
-    fprintf(proc, "%ld", pid);
-    fclose(proc);
+    printf("pid is %d\n", pid);
+    char string[1024];
+    sprintf(string, "echo \'%d\' > /proc/mp1/status", pid);
+    printf("%s\n", string);
+    system(string);
 }
 
 int factorial(unsigned long int num)
