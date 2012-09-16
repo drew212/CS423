@@ -5,14 +5,25 @@
 #include <linux/proc_fs.h>
 #include <linux/timer.h>
 
+<<<<<<< Updated upstream
 #define PROC_DIR_NAME "mp1"
 #define PROCFS_NAME "status"
+=======
+#define PROFCS_MAX_SIZE		1024
+#define PROCFS_NAME "mp1"
+>>>>>>> Stashed changes
 
 struct proc_dir_entry* proc_file_g;
 
 static struct timer_list timer;
 
+<<<<<<< Updated upstream
 struct proc_dir_entry* mp1_proc_dir_g;
+=======
+static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
+
+static unsigned long procfs_buffer_size = 0; //size of buffer
+>>>>>>> Stashed changes
 
 void
 timer_handler(unsigned long data)
@@ -33,17 +44,35 @@ procfile_read(
     void * data
     )
 {
-    int ret;
-    if (offset > 0)
-    {
-        ret = 0;
-    }
-    else
-    {
-        ret = sprintf(buffer, "HelloWorld!\n");
-    }
-    return ret;
+    if (offset > 0) {
+		/* we have finished to read, return 0 */
+		ret  = 0;
+	} else {
+		/* fill the buffer, return the buffer size */
+		copy_to_user(buffer, procfs_buffer, procfs_buffer_size);
+		printf(getpid(),":",jiffies);
+		ret = procfs_buffer_size;
+	}
+
+//TODO    
 }
+int procfile_write(struct file *file, const char *buffer, unsigned long count,
+		   void *data)
+{
+	/* get buffer size */
+	procfs_buffer_size = count;
+	if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
+		procfs_buffer_size = PROCFS_MAX_SIZE;
+	}
+	
+	/* write data to the buffer */
+	if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+		return -EFAULT;
+	}
+	
+	return procfs_buffer_size;
+}
+
 
 int __init
 my_module_init(void)
