@@ -14,6 +14,62 @@ static struct timer_list timer;
 
 struct proc_dir_entry* mp1_proc_dir_g;
 
+struct process_data{
+    int pid_id;
+    unsigned long cpu_time;
+    struct list_head list_node;
+};
+
+LIST_HEAD(process_list_g);
+
+//Function Prototypes
+void init_process_list();
+void destroy_process_list();
+void add_pid_to_list(int pid);
+void update_process_times();
+unsigned int get_process_times(char ** process_times);
+
+void
+init_process_list(){
+    //TODO: Initialize list.  May not be needed due to LIST_HEAD macro
+}
+
+/**
+ * Delete linked list.  Call after removing procfs entries
+ */
+void
+destroy_process_list(){
+    //TODO: Delete nodes and free memory.
+}
+
+/**
+ * Register a new pid when a process registers itself
+ */
+void
+add_pid_to_list(int pid){
+    //TODO: Make this thread safe.
+
+}
+
+/**
+ * Called by kernel thread to update process information in linked list
+ */
+void
+update_process_times(){
+    //TODO: Make this thread safe.
+}
+
+/**
+ * Retrieves a formatted string of process info.  Returns length of string.
+ */
+unsigned int
+get_process_times(char ** process_times){
+    //TODO: Make this thread safe.
+}
+
+
+
+
 void
 timer_handler(unsigned long data)
 {
