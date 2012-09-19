@@ -4,6 +4,8 @@
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
 #include <linux/timer.h>
+#include <linux/list.h>
+#include "mp1_given.h"
 
 #define PROC_DIR_NAME "mp1"
 #define PROCFS_NAME "status"
@@ -18,58 +20,101 @@ static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
 static unsigned long procfs_buffer_size = 0; //size of buffer
 
-struct process_data{
-    int pid_id;
+typedef struct process_data{
+    int process_id;
     unsigned long cpu_time;
     struct list_head list_node;
-};
+} process_data_t;
 
 LIST_HEAD(process_list_g);
 
 //Function Prototypes
-void init_process_list(void);
-void destroy_process_list(void);
-void add_pid_to_list(int pid);
-void update_process_times(void);
-unsigned int get_process_times(char ** process_times);
+void mp1_init_process_list(void);
+void mp1_destroy_process_list(void);
+void mp1_add_pid_to_list(int pid);
+void mp1_update_process_times(void);
+void mp1_update_process_times_unsafe(void);
+unsigned int mp1_get_process_times(char ** process_times);
 
 void
-init_process_list(){
+mp1_init_process_list(){
     //TODO: Initialize list.  May not be needed due to LIST_HEAD macro
 }
 
 /**
- * Delete linked list.  Call after removing procfs entries
+ * Delete linked list. Not thread safe so call after removing procfs entries
  */
 void
-destroy_process_list(){
-    //TODO: Delete nodes and free memory.
+mp1_destroy_process_list(){
+    process_data_t * pid_data = NULL;
+    process_data_t * temp_pid_data = NULL;
+    list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node) 
+    {
+        list_del(&pid_data->list_node);
+        kfree(pid_data);
+    }
 }
 
 /**
  * Register a new pid when a process registers itself
  */
 void
-add_pid_to_list(int pid){
+mp1_add_pid_to_list(int pid){
     //TODO: Make this thread safe.
+    process_data_t * new_pid_data = (process_data_t *)kmalloc(sizeof(process_data_t), GFP_KERNEL);
+    new_pid_data->process_id = pid;
+    new_pid_data->cpu_time = 0;
+    INIT_LIST_HEAD(&new_pid_data->list_node);
 
+    list_add_tail(&new_pid_data->list_node, &process_list_g);
+
+    mp1_update_process_times_unsafe();
 }
 
 /**
  * Called by kernel thread to update process information in linked list
  */
 void
-update_process_times(){
-    //TODO: Make this thread safe.
+mp1_update_process_times(){
+    //TODO: Make this thread safe
+    mp1_update_process_times_unsafe();
+}
+
+
+/**
+ * Unsafe version of update function.
+ */
+void
+mp1_update_process_times_unsafe(){
+    process_data_t * pid_data = NULL;
+    list_for_each_entry(pid_data, &process_list_g, list_node)
+    {
+        unsigned long cpu_time;
+        if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
+        {
+            pid_data->cpu_time = cpu_time;
+        }
+    }
 }
 
 /**
  * Retrieves a formatted string of process info.  Returns length of string.
+ * Be sure to kfree this string when you are done with it!
  */
 unsigned int
-get_process_times(char ** process_times){
+mp1_get_process_times(char ** process_times){
     //TODO: Make this thread safe.
-    return 0;
+    int index = 0;
+    process_data_t * pid_data;
+
+    *process_times = (char *)kmalloc(2048, GFP_KERNEL);
+    *process_times[0] = '\0';
+
+    list_for_each_entry(pid_data, &process_list_g, list_node)
+    {
+        index += sprintf(*process_times+index, "%d: %lu/n", pid_data->process_id, pid_data->cpu_time);
+    }
+    return index;
 }
 
 
