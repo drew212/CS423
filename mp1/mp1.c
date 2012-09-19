@@ -6,6 +6,7 @@
 #include <linux/timer.h>
 #include <linux/list.h>
 #include "mp1_given.h"
+#include <linux/mutex.h>
 #include <asm/uaccess.h>
 
 #define PROC_DIR_NAME "mp1"
@@ -40,6 +41,7 @@ typedef struct process_data{
 } process_data_t;
 
 LIST_HEAD(process_list_g);
+DEFINE_MUTEX(process_list_mutex_g);
 
 //Function Prototypes
 void mp1_init_process_list(void);
@@ -73,8 +75,11 @@ mp1_destroy_process_list(){
  */
 void
 mp1_add_pid_to_list(int pid){
-    //TODO: Make this thread safe.
-    process_data_t * new_pid_data = (process_data_t *)kmalloc(sizeof(process_data_t), GFP_KERNEL);
+    process_data_t * new_pid_data;
+
+    mutex_lock(&process_list_mutex_g);
+
+    new_pid_data = (process_data_t *)kmalloc(sizeof(process_data_t), GFP_KERNEL);
     new_pid_data->process_id = pid;
     new_pid_data->cpu_time = 0;
     INIT_LIST_HEAD(&new_pid_data->list_node);
@@ -82,6 +87,8 @@ mp1_add_pid_to_list(int pid){
     list_add_tail(&new_pid_data->list_node, &process_list_g);
 
     mp1_update_process_times_unsafe();
+
+    mutex_unlock(&process_list_mutex_g);
 }
 
 /**
@@ -89,8 +96,9 @@ mp1_add_pid_to_list(int pid){
  */
 void
 mp1_update_process_times(){
-    //TODO: Make this thread safe
+    mutex_lock(&process_list_mutex_g);
     mp1_update_process_times_unsafe();
+    mutex_unlock(&process_list_mutex_g);
 }
 
 
@@ -116,9 +124,10 @@ mp1_update_process_times_unsafe(){
  */
 unsigned int
 mp1_get_process_times(char ** process_times){
-    //TODO: Make this thread safe.
-    int index = 0;
+    unsigned int index = 0;
     process_data_t * pid_data;
+
+    mutex_lock(&process_list_mutex_g);
 
     *process_times = (char *)kmalloc(2048, GFP_KERNEL);
     *process_times[0] = '\0';
@@ -127,6 +136,7 @@ mp1_get_process_times(char ** process_times){
     {
         index += sprintf(*process_times+index, "%d: %lu/n", pid_data->process_id, pid_data->cpu_time);
     }
+    mutex_unlock(&process_list_mutex_g);
     return index;
 }
 
