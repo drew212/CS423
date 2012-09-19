@@ -54,6 +54,7 @@ void mp1_update_process_times(void);
 void mp1_update_process_times_unsafe(void);
 unsigned int mp1_get_process_times(char ** process_times);
 int thread_function(void * data);
+void start_kthread(void);
 
 void
 mp1_init_process_list(){
@@ -156,7 +157,7 @@ timer_handler(unsigned long data)
 {
     printk(KERN_INFO "TIMER RUN!!!" );
 
-    //wake_up_process(thread);
+    wake_up_process(thread);
 
     setup_timer(&timer, timer_handler, 0);
     mod_timer(&timer, jiffies + msecs_to_jiffies (5000));
@@ -210,6 +211,7 @@ procfile_write(
     void *data
     )
 {
+    int pid_from_proc_file;
     debugk(KERN_INFO "/proc/%s was written to!\n", FULL_PROC);
     /* get buffer size */
     procfs_buffer_size = count;
@@ -222,7 +224,7 @@ procfile_write(
         return -EFAULT;
     }
 
-    int pid_from_proc_file = simple_strtol(procfs_buffer, NULL, 10);
+    pid_from_proc_file = simple_strtol(procfs_buffer, NULL, 10);
 
     debugk(KERN_INFO "PID from process is: %d\n", pid_from_proc_file);
 
@@ -291,7 +293,6 @@ start_kthread(void)
 {
     debugk(KERN_INFO "Starting up kernel thread!\n");
     thread = kthread_run(&thread_function,  NULL, THREAD_NAME);
-    wake_up_process(thread);
 }
 
 /*
