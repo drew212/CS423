@@ -13,7 +13,7 @@ void main()
     int i;
     for(i = 1; i < 1000000000; i++)
     {
-        printf("%ld\n", factorial((i % 20)+1));
+        factorial((i % 20)+1);
     }
 }
 

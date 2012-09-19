@@ -55,6 +55,7 @@ void mp1_update_process_times_unsafe(void);
 unsigned int mp1_get_process_times(char ** process_times);
 int thread_function(void * data);
 void start_kthread(void);
+void stop_kthread(void);
 
 void
 mp1_init_process_list(){
@@ -62,17 +63,19 @@ mp1_init_process_list(){
 }
 
 /**
- * Delete linked list. Not thread safe so call after removing procfs entries
+ * Delete linked list. Call after removing procfs entries
  */
 void
 mp1_destroy_process_list(){
     process_data_t * pid_data = NULL;
     process_data_t * temp_pid_data = NULL;
+    mutex_lock(&process_list_mutex_g);
     list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node) 
     {
         list_del(&pid_data->list_node);
         kfree(pid_data);
     }
+    mutex_unlock(&process_list_mutex_g);
 }
 
 /**
@@ -265,11 +268,6 @@ my_module_init(void)
     setup_timer ( &timer, timer_handler, 0);
     mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
 
-    debugk(KERN_INFO "looking at eric's stuff");
-    mp1_add_pid_to_list(1);
-    mp1_add_pid_to_list(2);
-    //mp1_update_process_times();
-
     start_kthread();
     return 0;
 }
@@ -280,6 +278,7 @@ my_module_exit(void)
     remove_proc_entry(PROCFS_NAME, mp1_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
     mp1_destroy_process_list();
+    stop_kthread();
 
     del_timer ( &timer );
     printk(KERN_INFO "MODULE UNLOADED\n");
@@ -317,7 +316,7 @@ thread_function(void * data)
             return 0;
         mp1_update_process_times();
         set_current_state(TASK_INTERRUPTIBLE);
-        //TODO use wake_up_process(thread) to wake up this thread
+        schedule();
     }
     return 0;
 }
