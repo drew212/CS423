@@ -17,5 +17,6 @@
 modules.order
 mp1.mod.c
 Module.symvers
+mp1app
 
 test
