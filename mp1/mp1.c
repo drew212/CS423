@@ -5,25 +5,18 @@
 #include <linux/proc_fs.h>
 #include <linux/timer.h>
 
-<<<<<<< Updated upstream
 #define PROC_DIR_NAME "mp1"
 #define PROCFS_NAME "status"
-=======
-#define PROFCS_MAX_SIZE		1024
-#define PROCFS_NAME "mp1"
->>>>>>> Stashed changes
+#define PROCFS_MAX_SIZE 1024
 
 struct proc_dir_entry* proc_file_g;
 
 static struct timer_list timer;
 
-<<<<<<< Updated upstream
 struct proc_dir_entry* mp1_proc_dir_g;
-=======
 static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
 static unsigned long procfs_buffer_size = 0; //size of buffer
->>>>>>> Stashed changes
 
 struct process_data{
     int pid_id;
@@ -34,10 +27,10 @@ struct process_data{
 LIST_HEAD(process_list_g);
 
 //Function Prototypes
-void init_process_list();
-void destroy_process_list();
+void init_process_list(void);
+void destroy_process_list(void);
 void add_pid_to_list(int pid);
-void update_process_times();
+void update_process_times(void);
 unsigned int get_process_times(char ** process_times);
 
 void
@@ -76,6 +69,7 @@ update_process_times(){
 unsigned int
 get_process_times(char ** process_times){
     //TODO: Make this thread safe.
+    return 0;
 }
 
 
