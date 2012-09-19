@@ -8,6 +8,7 @@ void main()
     sprintf(string, "echo \'%d\' > /proc/mp1/status", pid);
     printf("%s\n", string);
     system(string);
+    factorial(10000);
 }
 
 int factorial(unsigned long int num)

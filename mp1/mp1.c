@@ -9,6 +9,9 @@
 #include <linux/mutex.h>
 #include <asm/uaccess.h>
 
+#include <linux/sched.h>
+#include <linux/kthread.h>
+
 #define PROC_DIR_NAME "mp1"
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
@@ -50,6 +53,7 @@ void mp1_add_pid_to_list(int pid);
 void mp1_update_process_times(void);
 void mp1_update_process_times_unsafe(void);
 unsigned int mp1_get_process_times(char ** process_times);
+int thread_function(void * data);
 
 void
 mp1_init_process_list(){
@@ -115,6 +119,12 @@ mp1_update_process_times_unsafe(){
         {
             pid_data->cpu_time = cpu_time;
         }
+        else
+        {
+            // If get_cpu returns an error, we don't know what to do
+            printk(KERN_ALERT "pid %d returns error with get_cpu_use()", pid_data->process_id);
+            pid_data->cpu_time = -1;
+        }
     }
 }
 
@@ -134,7 +144,7 @@ mp1_get_process_times(char ** process_times){
 
     list_for_each_entry(pid_data, &process_list_g, list_node)
     {
-        index += sprintf(*process_times+index, "%d: %lu/n", pid_data->process_id, pid_data->cpu_time);
+        index += sprintf(*process_times+index, "%d: %lu\n", pid_data->process_id, pid_data->cpu_time);
     }
     mutex_unlock(&process_list_mutex_g);
     return index;
@@ -164,6 +174,7 @@ procfile_read(
     )
 {
     int ret;
+    char * proc_buff = NULL;
 
     debugk(KERN_INFO "reading from procfile\n");
 
@@ -172,12 +183,19 @@ procfile_read(
         ret  = 0;
     } else {
         /* fill the buffer, return the buffer size */
-        int nbytes = copy_to_user(buffer, procfs_buffer, procfs_buffer_size);
+        int num_copied = mp1_get_process_times(&proc_buff);
+        //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
+        int nbytes = sprintf(buffer, "%s", proc_buff);
+        debugk(KERN_INFO "num_coppied: %d", num_copied);
+        debugk(KERN_INFO "%snbytes: %d\n", proc_buff, nbytes);
+
         if(nbytes > 0)
         {
             printk(KERN_ALERT "procfile_read copy_to_user failed!\n");
         }
-        ret = procfs_buffer_size;
+
+        kfree(proc_buff);
+        ret = nbytes;
     }
     return ret;
 }
@@ -237,6 +255,14 @@ my_module_init(void)
     setup_timer ( &timer, timer_handler, 0);
     mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
 
+    debugk(KERN_INFO "looking at eric's stuff");
+    mp1_add_pid_to_list(1291);
+    mp1_add_pid_to_list(1);
+    mp1_add_pid_to_list(2);
+    mp1_add_pid_to_list(3);
+    mp1_add_pid_to_list(4);
+    mp1_update_process_times();
+
     return 0;
 }
 
@@ -253,12 +279,11 @@ my_module_exit(void)
 /*
  * Starts the kernel thread
  */
-//TODO This should be static
 void
 start_kthread(void)
 {
-    //TODO
-    //task_struct = kthread_create(int(* thread_fucntion)(void* data),  NULL, THREAD_NAME);
+    thread = kthread_run(&thread_function,  NULL, THREAD_NAME);
+    wake_up_process(thread);
 }
 
 /*
@@ -276,7 +301,15 @@ stop_kthread(void)
 int
 thread_function(void * data)
 {
-    //TODO
+    while(1)
+    {
+        debugk(KERN_INFO "Thread running!\n");
+        if(kthread_should_stop())
+            return 0;
+        mp1_update_process_times();
+        set_current_state(TASK_INTERRUPTIBLE);
+        //TODO use wake_up_process(thread) to wake up this thread
+    }
     return 0;
 }
 
