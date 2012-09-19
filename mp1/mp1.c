@@ -118,12 +118,12 @@ mp1_update_process_times_unsafe(){
         if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
         {
             pid_data->cpu_time = cpu_time;
+            printk(KERN_INFO "pid: %d, cpu: %lu", pid_data->process_id, pid_data->cpu_time);
         }
         else
         {
             // If get_cpu returns an error, we don't know what to do
             printk(KERN_ALERT "pid %d returns error with get_cpu_use()", pid_data->process_id);
-            pid_data->cpu_time = -1;
         }
     }
 }
@@ -155,6 +155,8 @@ void
 timer_handler(unsigned long data)
 {
     printk(KERN_INFO "TIMER RUN!!!" );
+
+    //wake_up_process(thread);
 
     setup_timer(&timer, timer_handler, 0);
     mod_timer(&timer, jiffies + msecs_to_jiffies (5000));
@@ -189,7 +191,7 @@ procfile_read(
         debugk(KERN_INFO "num_coppied: %d", num_copied);
         debugk(KERN_INFO "%snbytes: %d\n", proc_buff, nbytes);
 
-        if(nbytes > 0)
+        if(nbytes != 0)
         {
             printk(KERN_ALERT "procfile_read copy_to_user failed!\n");
         }
@@ -219,6 +221,12 @@ procfile_write(
     if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
         return -EFAULT;
     }
+
+    int pid_from_proc_file = simple_strtol(procfs_buffer, NULL, 10);
+
+    debugk(KERN_INFO "PID from process is: %d\n", pid_from_proc_file);
+
+    mp1_add_pid_to_list(pid_from_proc_file);
     debugk(KERN_INFO "PID:%s, registered.\n", procfs_buffer);
 
     return procfs_buffer_size;
@@ -256,13 +264,11 @@ my_module_init(void)
     mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
 
     debugk(KERN_INFO "looking at eric's stuff");
-    mp1_add_pid_to_list(1291);
     mp1_add_pid_to_list(1);
     mp1_add_pid_to_list(2);
-    mp1_add_pid_to_list(3);
-    mp1_add_pid_to_list(4);
-    mp1_update_process_times();
+    //mp1_update_process_times();
 
+    start_kthread();
     return 0;
 }
 
@@ -271,6 +277,7 @@ my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp1_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
+    mp1_destroy_process_list();
 
     del_timer ( &timer );
     printk(KERN_INFO "MODULE UNLOADED\n");
@@ -282,6 +289,7 @@ my_module_exit(void)
 void
 start_kthread(void)
 {
+    debugk(KERN_INFO "Starting up kernel thread!\n");
     thread = kthread_run(&thread_function,  NULL, THREAD_NAME);
     wake_up_process(thread);
 }
@@ -292,7 +300,7 @@ start_kthread(void)
 void
 stop_kthread(void)
 {
-    //TODO
+    kthread_stop(thread);
 }
 
 /*
