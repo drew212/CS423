@@ -36,11 +36,10 @@ char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
 static unsigned long procfs_buffer_size = 0; //size of buffer
 
-typedef struct process_data{
-    int process_id;
-    unsigned long cpu_time;
-    struct list_head list_node;
-} process_data_t;
+typedef struct mp2_task_struct{
+    struct task_struct* linux_task;
+    struct timer_list wakeup_timer
+} task_struct_t;
 
 LIST_HEAD(process_list_g);
 DEFINE_MUTEX(process_list_mutex_g);
@@ -234,10 +233,18 @@ procfile_write(
     char* pid_str = strsep(&procfs_buffer_ptr, split);
     char* period = strsep(&procfs_buffer_ptr, split);
     char* time_of_computation = strsep(&procfs_buffer_ptr, split);
-    
+    if(time_of_computation == '\0')
+    {
+        printk(KERN_ALERT "Malformed procfs write, not registering/yeilding/de-regsitering");
+        return -1;
+    }
+
     printk("%s", pid_str);
     printk("%s", period);
     printk("%s", time_of_computation);
+
+
+    //TODO: Register the entry
 
 //    pid_from_proc_file = simple_strtol(procfs_buffer, NULL, 10);
 //
@@ -277,10 +284,10 @@ my_module_init(void)
     printk(KERN_INFO "/proc/%s created\n", FULL_PROC);
 
     //SETUP TIMER
-    setup_timer ( &timer, timer_handler, 0);
-    mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
+//    setup_timer ( &timer, timer_handler, 0);
+//    mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
 
-    start_kthread();
+//    start_kthread();
     return 0;
 }
 
@@ -290,9 +297,9 @@ my_module_exit(void)
     remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
     mp2_destroy_process_list();
-    stop_kthread();
+    //stop_kthread();
 
-    del_timer ( &timer );
+    //del_timer ( &timer );
     printk(KERN_INFO "MODULE UNLOADED\n");
 }
 

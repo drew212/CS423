@@ -17,4 +17,4 @@ modules:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SUBDIR) modules
 
 clean:
-	$(RM) -f *.ko *.o *.mod.c Module.symvers modules.order mp1app
+	$(RM) -f *.ko *.o *.mod.c Module.symvers modules.order mp2app
