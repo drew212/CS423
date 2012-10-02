@@ -5,18 +5,17 @@
 #include <linux/proc_fs.h>
 #include <linux/timer.h>
 #include <linux/list.h>
-#include "mp1_given.h"
 #include <linux/mutex.h>
 #include <asm/uaccess.h>
 
 #include <linux/sched.h>
 #include <linux/kthread.h>
 
-#define PROC_DIR_NAME "mp1"
+#define PROC_DIR_NAME "mp2"
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
-#define FULL_PROC "status/mp1"
-#define THREAD_NAME "mp1_task_thread"
+#define FULL_PROC "status/mp2"
+#define THREAD_NAME "mp2_task_thread"
 
 #define DEBUG
 
@@ -24,7 +23,7 @@
 #define debugk(...) printk(__VA_ARGS__)
 #endif
 
-struct proc_dir_entry* mp1_proc_dir_g;
+struct proc_dir_entry* mp2_proc_dir_g;
 struct proc_dir_entry* proc_file_g;
 
 struct semaphore thread_sem;
@@ -32,8 +31,8 @@ struct semaphore thread_sem;
 static struct timer_list timer;
 struct task_struct * thread;
 
-struct proc_dir_entry* mp1_proc_dir_g;
-static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
+struct proc_dir_entry* mp2_proc_dir_g;
+char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
 static unsigned long procfs_buffer_size = 0; //size of buffer
 
@@ -47,18 +46,18 @@ LIST_HEAD(process_list_g);
 DEFINE_MUTEX(process_list_mutex_g);
 
 //Function Prototypes
-void mp1_init_process_list(void);
-void mp1_destroy_process_list(void);
-void mp1_add_pid_to_list(int pid);
-void mp1_update_process_times(void);
-void mp1_update_process_times_unsafe(void);
-unsigned int mp1_get_process_times(char ** process_times);
+void mp2_init_process_list(void);
+void mp2_destroy_process_list(void);
+void mp2_add_pid_to_list(int pid);
+void mp2_update_process_times(void);
+void mp2_update_process_times_unsafe(void);
+unsigned int mp2_get_process_times(char ** process_times);
 int thread_function(void * data);
 void start_kthread(void);
 void stop_kthread(void);
 
 void
-mp1_init_process_list(){
+mp2_init_process_list(){
     //TODO: Initialize list.  May not be needed due to LIST_HEAD macro
 }
 
@@ -66,11 +65,11 @@ mp1_init_process_list(){
  * Delete linked list. Call after removing procfs entries
  */
 void
-mp1_destroy_process_list(){
+mp2_destroy_process_list(){
     process_data_t * pid_data = NULL;
     process_data_t * temp_pid_data = NULL;
     mutex_lock(&process_list_mutex_g);
-    list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node) 
+    list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node)
     {
         list_del(&pid_data->list_node);
         kfree(pid_data);
@@ -82,7 +81,7 @@ mp1_destroy_process_list(){
  * Register a new pid when a process registers itself
  */
 void
-mp1_add_pid_to_list(int pid){
+mp2_add_pid_to_list(int pid){
     process_data_t * new_pid_data;
 
     mutex_lock(&process_list_mutex_g);
@@ -94,7 +93,7 @@ mp1_add_pid_to_list(int pid){
 
     list_add_tail(&new_pid_data->list_node, &process_list_g);
 
-    mp1_update_process_times_unsafe();
+    mp2_update_process_times_unsafe();
 
     mutex_unlock(&process_list_mutex_g);
 }
@@ -103,9 +102,9 @@ mp1_add_pid_to_list(int pid){
  * Called by kernel thread to update process information in linked list
  */
 void
-mp1_update_process_times(){
+mp2_update_process_times(){
     mutex_lock(&process_list_mutex_g);
-    mp1_update_process_times_unsafe();
+    mp2_update_process_times_unsafe();
     mutex_unlock(&process_list_mutex_g);
 }
 
@@ -114,21 +113,21 @@ mp1_update_process_times(){
  * Unsafe version of update function.
  */
 void
-mp1_update_process_times_unsafe(){
+mp2_update_process_times_unsafe(){
     process_data_t * pid_data = NULL;
     list_for_each_entry(pid_data, &process_list_g, list_node)
     {
         unsigned long cpu_time;
-        if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
-        {
-            pid_data->cpu_time = cpu_time;
-            printk(KERN_INFO "pid: %d, cpu: %lu", pid_data->process_id, pid_data->cpu_time);
-        }
-        else
-        {
-            // If get_cpu returns an error, we don't know what to do
-            printk(KERN_ALERT "pid %d returns error with get_cpu_use()", pid_data->process_id);
-        }
+//        if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
+//        {
+//            pid_data->cpu_time = cpu_time;
+//            printk(KERN_INFO "pid: %d, cpu: %lu", pid_data->process_id, pid_data->cpu_time);
+//        }
+//        else
+//        {
+//            // If get_cpu returns an error, we don't know what to do
+//            printk(KERN_ALERT "pid %d returns error with get_cpu_use()", pid_data->process_id);
+//        }
     }
 }
 
@@ -137,7 +136,7 @@ mp1_update_process_times_unsafe(){
  * Be sure to kfree this string when you are done with it!
  */
 unsigned int
-mp1_get_process_times(char ** process_times){
+mp2_get_process_times(char ** process_times){
     unsigned int index = 0;
     process_data_t * pid_data;
 
@@ -189,7 +188,7 @@ procfile_read(
         ret  = 0;
     } else {
         /* fill the buffer, return the buffer size */
-        int num_copied = mp1_get_process_times(&proc_buff);
+        int num_copied = mp2_get_process_times(&proc_buff);
         //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
         int nbytes = sprintf(buffer, "%s", proc_buff);
         debugk(KERN_INFO "num_coppied: %d", num_copied);
@@ -215,6 +214,8 @@ procfile_write(
     )
 {
     int pid_from_proc_file;
+    const char split[] = ":";
+
     debugk(KERN_INFO "/proc/%s was written to!\n", FULL_PROC);
     /* get buffer size */
     procfs_buffer_size = count;
@@ -227,12 +228,23 @@ procfile_write(
         return -EFAULT;
     }
 
-    pid_from_proc_file = simple_strtol(procfs_buffer, NULL, 10);
+    char* procfs_buffer_ptr = procfs_buffer;
 
-    debugk(KERN_INFO "PID from process is: %d\n", pid_from_proc_file);
+    char* register_yield = strsep(&procfs_buffer_ptr, split);
+    char* pid_str = strsep(&procfs_buffer_ptr, split);
+    char* period = strsep(&procfs_buffer_ptr, split);
+    char* time_of_computation = strsep(&procfs_buffer_ptr, split);
+    
+    printk("%s", pid_str);
+    printk("%s", period);
+    printk("%s", time_of_computation);
 
-    mp1_add_pid_to_list(pid_from_proc_file);
-    debugk(KERN_INFO "PID:%s, registered.\n", procfs_buffer);
+//    pid_from_proc_file = simple_strtol(procfs_buffer, NULL, 10);
+//
+//    debugk(KERN_INFO "PID from process is: %d\n", pid_from_proc_file);
+//
+//    mp2_add_pid_to_list(pid_from_proc_file);
+//    debugk(KERN_INFO "PID:%s, registered.\n", procfs_buffer);
 
     return procfs_buffer_size;
 }
@@ -244,13 +256,13 @@ my_module_init(void)
     printk(KERN_INFO "MODULE LOADED\n");
     debugk(KERN_INFO "debugging works!\n");
 
-    //Setup /proc/mp1/status
-    mp1_proc_dir_g = proc_mkdir(PROC_DIR_NAME, NULL);
-    proc_file_g = create_proc_entry(PROCFS_NAME, 0666, mp1_proc_dir_g);
+    //Setup /proc/mp2/status
+    mp2_proc_dir_g = proc_mkdir(PROC_DIR_NAME, NULL);
+    proc_file_g = create_proc_entry(PROCFS_NAME, 0666, mp2_proc_dir_g);
 
     if(proc_file_g == NULL)
     {
-        remove_proc_entry(PROCFS_NAME, mp1_proc_dir_g);
+        remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
         printk(KERN_ALERT "Error: Could not initialize /proc/%s\n", FULL_PROC);
         return -ENOMEM;
     }
@@ -275,9 +287,9 @@ my_module_init(void)
 void __exit
 my_module_exit(void)
 {
-    remove_proc_entry(PROCFS_NAME, mp1_proc_dir_g);
+    remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
-    mp1_destroy_process_list();
+    mp2_destroy_process_list();
     stop_kthread();
 
     del_timer ( &timer );
@@ -314,7 +326,7 @@ thread_function(void * data)
         debugk(KERN_INFO "Thread running!\n");
         if(kthread_should_stop())
             return 0;
-        mp1_update_process_times();
+        mp2_update_process_times();
         set_current_state(TASK_INTERRUPTIBLE);
         schedule();
     }
