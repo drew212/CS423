@@ -12,11 +12,11 @@
 *.la
 *.a
 
-*.mp1.*
+*.mp*.*
 *.tmp_versions
 modules.order
-mp1.mod.c
+*.mod.c
 Module.symvers
-mp1app
+mp*app
 
 test

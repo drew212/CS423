@@ -70,7 +70,7 @@ int mp2_register(ULONG pid, ULONG period, ULONG computation);
 int mp2_yield(ULONG pid);
 int mp2_deregister(ULONG pid);
 void set_pid_ready(ULONG pid);
-bool admission_control(ULONG period, ULONG proc_time);
+bool mp2_admission_control(ULONG period, ULONG proc_time);
 
 /**
  * Delete linked list. Call after removing procfs entries
@@ -177,7 +177,7 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
     printk(KERN_INFO "Registering PID %ld, period: %ld, comp: %ld\n", pid, period, proc_time);
     task_struct_t * new_task_data;
 
-    if(!admission_control(period, proc_time))
+    if(!mp2_admission_control(period, proc_time))
     {
         // We don't have processor time returning that we're busy
         return -EBUSY;
@@ -199,29 +199,6 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
     mutex_unlock(&process_list_mutex_g);
 
     return 0;
-}
-
-bool admission_control(ULONG period, ULONG proc_time)
-{
-    task_struct_t * task_data;
-
-    mutex_lock(&process_list_mutex_g);
-
-    double compute = 0;
-
-    list_for_each_entry(task_data, &process_list_g, list_node)
-    {
-        compute += task_data->proc_time / task_data->period;
-    }
-
-    mutex_unlock(&process_list_mutex_g);
-
-    compute += proc_time / period;
-
-    if(compute <= 0.639)
-        return true;
-    else return false;
-
 }
 
 int
@@ -277,12 +254,14 @@ mp2_deregister(ULONG pid)
 }
 
 bool
-mp2_addmission_control(ULONG proc_time, ULONG period)
+mp2_admission_control(ULONG proc_time, ULONG period)
 {
     double utilization = 0;
 
+    task_struct_t * task_data;
+
     mutex_lock(&process_list_mutex_g);
-    list_for_each_entry_safe(task_data, temp_task_data, &process_list_g, list_node)
+    list_for_each_entry(task_data, &process_list_g, list_node)
     {
         utilization += task_data->proc_time / task_data->period;
     }
