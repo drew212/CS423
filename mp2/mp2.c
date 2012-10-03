@@ -432,6 +432,7 @@ my_module_init(void)
     if(proc_file_g == NULL)
     {
         remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
+        remove_proc_entry(PROC_DIR_NAME, NULL);
         printk(KERN_ALERT "Error: Could not initialize /proc/%s\n", FULL_PROC);
         return -ENOMEM;
     }

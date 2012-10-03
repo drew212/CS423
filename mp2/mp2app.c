@@ -21,7 +21,7 @@ void register_process(int my_pid, unsigned int period, unsigned int computation_
 }
 
 //TODO Write comments
-int am_i_registered(int my_pid)
+int is_registered(int my_pid)
 {
     int is_registered = 0;
     char line[1024];
@@ -97,7 +97,8 @@ int main()
     unsigned int computation_time = get_comp_time(period);
 
     register_process(my_pid, period, computation_time);
-    if(0 == am_i_registered(my_pid))
+
+    if(!is_registered(my_pid))
     {
         printf("%d: I was unable to register.  ;_;\n", my_pid);
         exit(1);
