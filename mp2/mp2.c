@@ -38,6 +38,7 @@ struct proc_dir_entry* proc_file_g;
 static struct timer_list timer_g;
 struct task_struct * thread_g;
 
+
 struct proc_dir_entry* mp2_proc_dir_g;
 char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
@@ -54,19 +55,14 @@ typedef struct mp2_task_struct{
     struct list_head list_node;
 } task_struct_t;
 
-typedef struct process_data {
-    int process_id;
-    ULONG cpu_time;
-    struct list_head list_node;
-} process_data_t;
+task_struct_t * running_process_g;
 
 LIST_HEAD(process_list_g);
 DEFINE_MUTEX(process_list_mutex_g);
 
 //Function Prototypes
 void mp2_destroy_process_list(void);
-void mp2_update_process_times(void);
-void mp2_update_process_times_unsafe(void);
+void mp2_update_tasks(void);
 UINT mp2_get_process_times(char ** process_times);
 int thread_function(void * data);
 void start_kthread(void);
@@ -74,6 +70,7 @@ void stop_kthread(void);
 int mp2_register(ULONG pid, ULONG period, ULONG computation);
 int mp2_yeild(ULONG pid);
 int mp2_deregister(ULONG pid);
+void set_pid_ready(ULONG pid);
 
 
 /**
@@ -88,9 +85,9 @@ mp2_destroy_process_list(){
     list_for_each_entry_safe(task_data, temp_task_data, &process_list_g, list_node)
     {
         list_del(&task_data->list_node);
-        if(task_data->state == RUNNING)
+        if(task_data->state == SLEEPING)
         {
-            //del_timer(task_data->wakeup_timer);
+            del_timer(task_data->wakeup_timer);
         }
         kfree(task_data->wakeup_timer);
         kfree(task_data);
@@ -98,38 +95,41 @@ mp2_destroy_process_list(){
     mutex_unlock(&process_list_mutex_g);
 }
 
-/**
- * Called by kernel thread to update process information in linked list
- */
 void
-mp2_update_process_times(){
-    //TODO remove this
-    mutex_lock(&process_list_mutex_g);
-    mp2_update_process_times_unsafe();
-    mutex_unlock(&process_list_mutex_g);
-}
+mp2_update_tasks(void)
+{
+    task_struct_t * curr_process = NULL;
+    task_struct_t * next_process = NULL;
+    task_struct_t * process_to_remove = NULL;
 
-/**
- * Unsafe version of update function.
- */
-void
-mp2_update_process_times_unsafe(){
-    //TODO remove this
-    process_data_t * pid_data = NULL;
-    list_for_each_entry(pid_data, &process_list_g, list_node)
+    mutex_lock(&process_list_mutex_g);
+    list_for_each_entry(curr_process, &process_list_g, list_node)
     {
-//        ULONG cpu_time;
-//        if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
-//        {
-//            pid_data->cpu_time = cpu_time;
-//            printk(KERN_INFO "pid: %d, cpu: %lu", pid_data->process_id, pid_data->cpu_time);
-//        }
-//        else
-//        {
-//            // If get_cpu returns an error, we don't know what to do
-//            printk(KERN_ALERT "pid %d returns error with get_cpu_use()", pid_data->process_id);
-//        }
+        // Find the task with state == READY and shortest period
+        if(next_process == NULL || (curr_process->state == READY && next_process->period > curr_process->period))
+        {
+            next_process = curr_process;
+        }
+        if(running_process_g->state == RUNNING)
+        {
+            running_process_g->state = SLEEPING;
+        }
     }
+    //TODO: do we need the mutex for the code below here?
+
+    // Preempt the currently running task
+    struct sched_param sparam_remove;
+    sparam_remove.sched_priority = 0;
+    sched_setscheduler(running_process_g->linux_task, SCHED_NORMAL, &sparam_remove);
+
+    //TODO: set state of new task to running and schedule it
+    struct sched_param sparam_schedule;
+    next_process->state = RUNNING;
+    wake_up_process(next_process->linux_task);
+    sparam_schedule.sched_priority=MAX_USER_RT_PRIO-1;
+    sched_setscheduler(next_process->linux_task, SCHED_FIFO, &sparam_schedule);
+
+    mutex_unlock(&process_list_mutex_g);
 }
 
 /**
@@ -163,10 +163,13 @@ timer_handler(ULONG pid)
 {
     printk(KERN_INFO "Timer run for pid: %ld", pid);
 
-    //TODO: set the pid state to ready and call dispatch thread
+    // Set the pid state to ready and call dispatch thread
+    set_pid_ready(pid)
 
-    setup_timer(&timer_g, timer_handler, 0);
-    mod_timer(&timer_g, jiffies + msecs_to_jiffies (5000));
+    wake_up_process(thread_g);
+
+    //setup_timer(&timer_g, timer_handler, 0);
+    //mod_timer(&timer_g, jiffies + msecs_to_jiffies (5000));
 }
 
 int
@@ -195,6 +198,7 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
 
     return 0;
 }
+
 int
 mp2_yeild(ULONG pid)
 {
@@ -202,6 +206,7 @@ mp2_yeild(ULONG pid)
     printk(KERN_INFO "pid %ld is yielding \n", pid);
     return -EINVAL;
 }
+
 int
 mp2_deregister(ULONG pid)
 {
@@ -218,9 +223,10 @@ mp2_deregister(ULONG pid)
         if(task_data->PID == pid)
         {
             list_del(&task_data->list_node);
-            if(task_data->state == RUNNING)
+            if(task_data->state == SLEEEPING)
             {
-                //TODO: del_timer(task_data->wakeup_timer);
+                //TODO we may need to cleanup timer memory here
+                //del_timer(task_data->wakeup_timer);
             }
             kfree(task_data->wakeup_timer);
             kfree(task_data);
@@ -228,6 +234,26 @@ mp2_deregister(ULONG pid)
     }
     mutex_unlock(&process_list_mutex_g);
     return 0;
+}
+
+void set_pid_ready(ULONG pid)
+{
+    printk(KERN_INFO "deregistering pid %ld", pid);
+
+    task_struct_t * task_data;
+    task_struct_t * temp_task_data;
+
+    mutex_lock(&process_list_mutex_g);
+
+    list_for_each_entry_safe(task_data, temp_task_data, &process_list_g, list_node)
+    {
+        if(task_data->PID == pid)
+        {
+            task_data->state = READY;
+            //TODO - what do we do with the timer here? I'm uber tired and like blah sorry...
+        }
+    }
+    mutex_unlock(&process_list_mutex_g);
 }
 
 /*
@@ -346,7 +372,7 @@ procfile_write(
 }
 
 
-    int __init
+int __init
 my_module_init(void)
 {
     printk(KERN_INFO "MODULE LOADED\n");
@@ -374,21 +400,20 @@ my_module_init(void)
     return 0;
 }
 
-    void __exit
+void __exit
 my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
     mp2_destroy_process_list();
 
-    //del_timer ( &timer_g );
     printk(KERN_INFO "MODULE UNLOADED\n");
 }
 
 /*
  * Starts the kernel thread
  */
-    void
+void
 start_kthread(void)
 {
     debugk(KERN_INFO "Starting up kernel thread!\n");
@@ -398,7 +423,7 @@ start_kthread(void)
 /*
  * Stops the kernel thread
  */
-    void
+void
 stop_kthread(void)
 {
     kthread_stop(thread_g);
@@ -406,8 +431,10 @@ stop_kthread(void)
 
 /*
  * This is the function that executes when the thread is run.
+ * After start wake up with:
+ * wake_up_process(thread);
  */
-    int
+int
 thread_function(void * data)
 {
     while(1)
@@ -415,7 +442,9 @@ thread_function(void * data)
         debugk(KERN_INFO "Thread running!\n");
         if(kthread_should_stop())
             return 0;
-        mp2_update_process_times();
+        task_struct_t * task_data;
+        mp2_update_tasks();
+
         set_current_state(TASK_INTERRUPTIBLE);
         schedule();
     }
