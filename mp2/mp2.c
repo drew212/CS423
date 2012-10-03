@@ -71,6 +71,7 @@ int mp2_yield(ULONG pid);
 int mp2_deregister(ULONG pid);
 void set_pid_ready(ULONG pid);
 bool mp2_admission_control(ULONG period, ULONG proc_time);
+void mp2_set_timer(task_struct_t * process);
 
 /**
  * Delete linked list. Call after removing procfs entries
@@ -207,8 +208,8 @@ void
 mp2_set_timer(task_struct_t * process)
 {
     printk(KERN_INFO "PID: %ld, timer reset", process->PID);
-    setup_timer(&process->wakeup_timer, timer_handler, task_data->PID);
-    mod_timer(&process->wakeup_timer, jiffies + msecs_to_jiffies (task_data->period));
+    setup_timer(&process->wakeup_timer, timer_handler, process->PID);
+    mod_timer(&process->wakeup_timer, jiffies + msecs_to_jiffies (process->period));
 }
 
 int
@@ -225,13 +226,11 @@ mp2_yield(ULONG pid)
     {
         if(task_data->PID == pid)
         {
-            //TODO only set timer and put to sleep if the next period hasn't started
-            mp2_set_timer(task_data);
-
             set_task_state(task_data->linux_task, TASK_UNINTERRUPTIBLE);
         }
     }
     mutex_unlock(&process_list_mutex_g);
+    wake_up_process(thread_g);
     return 0;
 }
 
@@ -298,7 +297,7 @@ set_pid_ready(ULONG pid)
             //TODO set period for task_data accordingly
             task_data->state = READY;
 
-            mp2_set_timer(task_data)
+            mp2_set_timer(task_data);
         }
     }
     mutex_unlock(&process_list_mutex_g);
