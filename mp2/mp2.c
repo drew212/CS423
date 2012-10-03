@@ -84,10 +84,10 @@ mp2_destroy_process_list(){
     list_for_each_entry_safe(task_data, temp_task_data, &process_list_g, list_node)
     {
         list_del(&task_data->list_node);
-        if(task_data->state == SLEEPING)
-        {
-            del_timer(&task_data->wakeup_timer);
-        }
+
+        del_timer(&task_data->wakeup_timer);
+
+
         kfree(task_data);
     }
     mutex_unlock(&process_list_mutex_g);
@@ -196,9 +196,19 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
 
     list_add_tail(&new_task_data->list_node, &process_list_g);
 
+    mp2_set_timer(new_task_data);
+
     mutex_unlock(&process_list_mutex_g);
 
     return 0;
+}
+
+void
+mp2_set_timer(task_struct_t * process)
+{
+    printk(KERN_INFO "PID: %ld, timer reset", process->PID);
+    setup_timer(&process->wakeup_timer, timer_handler, task_data->PID);
+    mod_timer(&process->wakeup_timer, jiffies + msecs_to_jiffies (task_data->period));
 }
 
 int
@@ -215,10 +225,9 @@ mp2_yield(ULONG pid)
     {
         if(task_data->PID == pid)
         {
-            setup_timer(&task_data->wakeup_timer, timer_handler, task_data->PID);
-            //TODO might need to figure out how much time is left and/or how long the task has been running
-            mod_timer(&task_data->wakeup_timer, jiffies + msecs_to_jiffies (task_data->period));
             //TODO only set timer and put to sleep if the next period hasn't started
+            mp2_set_timer(task_data);
+
             set_task_state(task_data->linux_task, TASK_UNINTERRUPTIBLE);
         }
     }
@@ -241,10 +250,9 @@ mp2_deregister(ULONG pid)
         if(task_data->PID == pid)
         {
             list_del(&task_data->list_node);
-            if(task_data->state == SLEEPING)
-            {
-                del_timer(&task_data->wakeup_timer);
-            }
+
+            del_timer(&task_data->wakeup_timer);
+
             kfree(&task_data->wakeup_timer);
             kfree(task_data);
         }
@@ -290,9 +298,7 @@ set_pid_ready(ULONG pid)
             //TODO set period for task_data accordingly
             task_data->state = READY;
 
-            setup_timer(&task_data->wakeup_timer, timer_handler, task_data->PID);
-            //TODO might need to figure out how much time is left and/or how long the task has been running
-            mod_timer(&task_data->wakeup_timer, jiffies + msecs_to_jiffies (task_data->period));
+            mp2_set_timer(task_data)
         }
     }
     mutex_unlock(&process_list_mutex_g);
