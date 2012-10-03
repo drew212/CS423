@@ -70,7 +70,7 @@ int mp2_register(ULONG pid, ULONG period, ULONG computation);
 int mp2_yield(ULONG pid);
 int mp2_deregister(ULONG pid);
 void set_pid_ready(ULONG pid);
-
+bool admission_control(ULONG period, ULONG proc_time);
 
 /**
  * Delete linked list. Call after removing procfs entries
@@ -110,22 +110,25 @@ mp2_update_tasks(void)
         }
         if(running_process_g->state == RUNNING)
         {
-            running_process_g->state = SLEEPING;
+            running_process_g->state = READY;
         }
     }
-    //TODO: do we need really the mutex for the code below here?
 
-    // Preempt the currently running task
-    struct sched_param sparam_remove;
-    sparam_remove.sched_priority = 0;
-    sched_setscheduler(running_process_g->linux_task, SCHED_NORMAL, &sparam_remove);
-
-    // Set state of new task to running and schedule it
-    struct sched_param sparam_schedule;
     next_process->state = RUNNING;
-    wake_up_process(next_process->linux_task);
-    sparam_schedule.sched_priority=MAX_USER_RT_PRIO-1;
-    sched_setscheduler(next_process->linux_task, SCHED_FIFO, &sparam_schedule);
+
+    if(running_process_g->PID != next_process->PID)
+    {
+        // Preempt the currently running task
+        struct sched_param sparam_remove;
+        sparam_remove.sched_priority = 0;
+        sched_setscheduler(running_process_g->linux_task, SCHED_NORMAL, &sparam_remove);
+
+        // Set state of new task to running and schedule it
+        struct sched_param sparam_schedule;
+        wake_up_process(next_process->linux_task);
+        sparam_schedule.sched_priority=MAX_USER_RT_PRIO-1;
+        sched_setscheduler(next_process->linux_task, SCHED_FIFO, &sparam_schedule);
+    }
 
     mutex_unlock(&process_list_mutex_g);
 }
@@ -196,6 +199,29 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
     mutex_unlock(&process_list_mutex_g);
 
     return 0;
+}
+
+bool admission_control(ULONG period, ULONG proc_time)
+{
+    task_struct_t * task_data;
+
+    mutex_lock(&process_list_mutex_g);
+
+    double compute = 0;
+
+    list_for_each_entry(task_data, &process_list_g, list_node)
+    {
+        compute += task_data->proc_time / task_data->period;
+    }
+
+    mutex_unlock(&process_list_mutex_g);
+
+    compute += proc_time / period;
+
+    if(compute <= 0.639)
+        return true;
+    else return false;
+
 }
 
 int
@@ -282,7 +308,12 @@ set_pid_ready(ULONG pid)
     {
         if(task_data->PID == pid)
         {
+            //TODO set period for task_data accordingly
             task_data->state = READY;
+
+            setup_timer(&task_data->wakeup_timer, timer_handler, task_data->PID);
+            //TODO might need to figure out how much time is left and/or how long the task has been running
+            mod_timer(&task_data->wakeup_timer, jiffies + msecs_to_jiffies (task_data->period));
         }
     }
     mutex_unlock(&process_list_mutex_g);
