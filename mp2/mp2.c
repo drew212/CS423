@@ -138,19 +138,20 @@ mp2_update_process_times_unsafe(){
  */
 UINT
 mp2_get_process_times(char ** process_times){
-    //TODO: remove or update this
+    //TODO: rename this
     UINT index = 0;
-    task_struct_t * pid_data;
+    task_struct_t * task_data;
 
     mutex_lock(&process_list_mutex_g);
 
     *process_times = (char *)kmalloc(MAX_INPUT * sizeof(char), GFP_KERNEL);
     *process_times[0] = '\0';
 
-    list_for_each_entry(pid_data, &process_list_g, list_node)
+    index += sprintf(*process_times+index, "PID:Period:Computation\n");
+    list_for_each_entry(task_data, &process_list_g, list_node)
     {
-        index += sprintf(*process_times+index, "%ld: Period:%ld Comptation %ld\n",
-                pid_data->PID, pid_data->period, pid_data->proc_time);
+        index += sprintf(*process_times+index, "%ld:%ld:%ld\n",
+                task_data->PID, task_data->period, task_data->proc_time);
     }
     mutex_unlock(&process_list_mutex_g);
     return index;
@@ -172,24 +173,23 @@ int
 mp2_register(ULONG pid, ULONG period, ULONG proc_time)
 {
     //TODO test this, check for errors and return error codes
-    printk(KERN_INFO "registering pid %ld\n", pid);
-    task_struct_t * new_pid_data;
+    printk(KERN_INFO "Registering PID %ld, period: %ld, comp: %ld\n", pid, period, proc_time);
+    task_struct_t * new_task_data;
 
-    new_pid_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
-    new_pid_data->linux_task = find_task_by_pid(pid);
-    new_pid_data->PID = pid;
-    new_pid_data->state = SLEEPING;
-    new_pid_data->period = period;
-    new_pid_data->proc_time = proc_time;
-    new_pid_data->wakeup_timer = (struct timer_list *)kmalloc(sizeof(struct timer_list), GFP_KERNEL);
-    //TODO: clean up memory from timers
-    //TODO: setup_timer(new_pid_data->wakeup_timer, timer_handler, new_pid_data->PID);
+    new_task_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
+    new_task_data->linux_task = find_task_by_pid(pid);
+    new_task_data->PID = pid;
+    new_task_data->state = SLEEPING;
+    new_task_data->period = period;
+    new_task_data->proc_time = proc_time;
+    new_task_data->wakeup_timer = (struct timer_list *)kmalloc(sizeof(struct timer_list), GFP_KERNEL);
+    //TODO: setup_timer(new_task_data->wakeup_timer, timer_handler, new_task_data->PID);
 
     mutex_lock(&process_list_mutex_g);
 
-    INIT_LIST_HEAD(&new_pid_data->list_node);
+    INIT_LIST_HEAD(&new_task_data->list_node);
 
-    list_add_tail(&new_pid_data->list_node, &process_list_g);
+    list_add_tail(&new_task_data->list_node, &process_list_g);
 
     mutex_unlock(&process_list_mutex_g);
 
@@ -207,7 +207,27 @@ mp2_deregister(ULONG pid)
 {
     //TODO
     printk(KERN_INFO "deregistering pid %ld", pid);
-    return -EINVAL;
+
+    task_struct_t * task_data;
+    task_struct_t * temp_task_data;
+
+    mutex_lock(&process_list_mutex_g);
+
+    list_for_each_entry_safe(task_data, temp_task_data, &process_list_g, list_node)
+    {
+        if(task_data->PID == pid)
+        {
+            list_del(&task_data->list_node);
+            if(task_data->state == RUNNING)
+            {
+                del_timer(task_data->wakeup_timer);
+            }
+            kfree(task_data->wakeup_timer);
+            kfree(task_data);
+        }
+    }
+    mutex_unlock(&process_list_mutex_g);
+    return 0;
 }
 
 /*
@@ -215,13 +235,13 @@ mp2_deregister(ULONG pid)
  */
 int
 procfile_read(
-    char * buffer,
-    char ** buffer_location,
-    off_t offset,
-    int buffer_length,
-    int * eof,
-    void * data
-    )
+        char * buffer,
+        char ** buffer_location,
+        off_t offset,
+        int buffer_length,
+        int * eof,
+        void * data
+        )
 {
     int ret;
     char * proc_buff = NULL;
@@ -233,14 +253,15 @@ procfile_read(
         ret  = 0;
     } else {
 
-        mp2_get_process_times(&proc_buff); // TODO: may want to check return?
+        int num_copied = mp2_get_process_times(&proc_buff); // TODO: may want to check return?
+        //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
         int nbytes = sprintf(buffer, "%s", proc_buff);
+        printk(KERN_INFO "trying to print:%s", proc_buff);
 
         if(nbytes != 0)
         {
-            printk(KERN_ALERT "procfile_read failed!\n");
-            kfree(proc_buff);
-            return -EFAULT;
+            //printk(KERN_ALERT "procfile_read failed!\n");
+            //TODO: i don't know what to do here, sprintf is returning 0 always, but it is writing to the buffer
         }
 
         kfree(proc_buff);
@@ -251,11 +272,11 @@ procfile_read(
 
 int
 procfile_write(
-    struct file *file,
-    const char *buffer,
-    ULONG count,
-    void *data
-    )
+        struct file *file,
+        const char *buffer,
+        ULONG count,
+        void *data
+        )
 {
     int pid_from_proc_file;
     const char split[] = ":";
@@ -298,7 +319,6 @@ procfile_write(
     int ret = 0;
     if( register_action[0] == 'R' )
     {
-        printk(KERN_INFO "Registering PID %ld, period: %ld, comp: %ld\n", pid, period, computation);
         ret = mp2_register(pid, period, computation);
     }
     else if ( register_action[0] == 'Y' )
@@ -324,11 +344,10 @@ procfile_write(
 }
 
 
-int __init
+    int __init
 my_module_init(void)
 {
     printk(KERN_INFO "MODULE LOADED\n");
-    debugk(KERN_INFO "debugging works!\n");
 
     //Setup /proc/mp2/status
     mp2_proc_dir_g = proc_mkdir(PROC_DIR_NAME, NULL);
@@ -353,7 +372,7 @@ my_module_init(void)
     return 0;
 }
 
-void __exit
+    void __exit
 my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
@@ -367,7 +386,7 @@ my_module_exit(void)
 /*
  * Starts the kernel thread
  */
-void
+    void
 start_kthread(void)
 {
     debugk(KERN_INFO "Starting up kernel thread!\n");
@@ -377,7 +396,7 @@ start_kthread(void)
 /*
  * Stops the kernel thread
  */
-void
+    void
 stop_kthread(void)
 {
     kthread_stop(thread_g);
@@ -386,7 +405,7 @@ stop_kthread(void)
 /*
  * This is the function that executes when the thread is run.
  */
-int
+    int
 thread_function(void * data)
 {
     while(1)
