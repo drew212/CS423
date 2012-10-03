@@ -11,11 +11,19 @@
 #include <linux/sched.h>
 #include <linux/kthread.h>
 
+#include "mp2_given.h"
+#include "defs.h"
+
 #define PROC_DIR_NAME "mp2"
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
 #define FULL_PROC "status/mp2"
 #define THREAD_NAME "mp2_task_thread"
+
+// Process States
+#define READY 0
+#define RUNNING 1
+#define SLEEPING 2
 
 #define DEBUG
 
@@ -26,20 +34,30 @@
 struct proc_dir_entry* mp2_proc_dir_g;
 struct proc_dir_entry* proc_file_g;
 
-struct semaphore thread_sem;
-
-static struct timer_list timer;
-struct task_struct * thread;
+static struct timer_list timer_g;
+struct task_struct * thread_g;
 
 struct proc_dir_entry* mp2_proc_dir_g;
 char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
-static unsigned long procfs_buffer_size = 0; //size of buffer
+static ULONG procfs_buffer_size_g = 0; //size of buffer
 
 typedef struct mp2_task_struct{
     struct task_struct* linux_task;
-    struct timer_list wakeup_timer
+    struct timer_list wakeup_timer;
+    int state;
+    ULONG PID;
+    ULONG period;
+    ULONG proc_time;
+
+    struct list_head list_node;
 } task_struct_t;
+
+typedef struct process_data {
+    int process_id;
+    ULONG cpu_time;
+    struct list_head list_node;
+} process_data_t;
 
 LIST_HEAD(process_list_g);
 DEFINE_MUTEX(process_list_mutex_g);
@@ -47,13 +65,16 @@ DEFINE_MUTEX(process_list_mutex_g);
 //Function Prototypes
 void mp2_init_process_list(void);
 void mp2_destroy_process_list(void);
-void mp2_add_pid_to_list(int pid);
+void mp2_add_pid_to_list(ULONG pid, ULONG period, ULONG proc_time);
 void mp2_update_process_times(void);
 void mp2_update_process_times_unsafe(void);
-unsigned int mp2_get_process_times(char ** process_times);
+UINT mp2_get_process_times(char ** process_times);
 int thread_function(void * data);
 void start_kthread(void);
 void stop_kthread(void);
+int mp2_register(ULONG pid, ULONG period, ULONG computation);
+int mp2_yeild(ULONG pid);
+int mp2_deregister(ULONG pid);
 
 void
 mp2_init_process_list(){
@@ -80,19 +101,19 @@ mp2_destroy_process_list(){
  * Register a new pid when a process registers itself
  */
 void
-mp2_add_pid_to_list(int pid){
-    process_data_t * new_pid_data;
+mp2_add_pid_to_list(ULONG pid, ULONG period, ULONG proc_time){
+    task_struct_t * new_pid_data;
 
     mutex_lock(&process_list_mutex_g);
+    new_pid_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
+    new_pid_data->PID = pid;
+    new_pid_data->state = SLEEPING;
+    new_pid_data->period = period;
+    new_pid_data->proc_time = proc_time;
 
-    new_pid_data = (process_data_t *)kmalloc(sizeof(process_data_t), GFP_KERNEL);
-    new_pid_data->process_id = pid;
-    new_pid_data->cpu_time = 0;
     INIT_LIST_HEAD(&new_pid_data->list_node);
 
     list_add_tail(&new_pid_data->list_node, &process_list_g);
-
-    mp2_update_process_times_unsafe();
 
     mutex_unlock(&process_list_mutex_g);
 }
@@ -116,7 +137,7 @@ mp2_update_process_times_unsafe(){
     process_data_t * pid_data = NULL;
     list_for_each_entry(pid_data, &process_list_g, list_node)
     {
-        unsigned long cpu_time;
+//        ULONG cpu_time;
 //        if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
 //        {
 //            pid_data->cpu_time = cpu_time;
@@ -134,9 +155,9 @@ mp2_update_process_times_unsafe(){
  * Retrieves a formatted string of process info.  Returns length of string.
  * Be sure to kfree this string when you are done with it!
  */
-unsigned int
+UINT
 mp2_get_process_times(char ** process_times){
-    unsigned int index = 0;
+    UINT index = 0;
     process_data_t * pid_data;
 
     mutex_lock(&process_list_mutex_g);
@@ -154,14 +175,36 @@ mp2_get_process_times(char ** process_times){
 
 
 void
-timer_handler(unsigned long data)
+timer_handler(ULONG pid)
 {
     printk(KERN_INFO "TIMER RUN!!!" );
 
-    wake_up_process(thread);
+    //TODO: set the pid state to ready and call dispatch thread
 
-    setup_timer(&timer, timer_handler, 0);
-    mod_timer(&timer, jiffies + msecs_to_jiffies (5000));
+    setup_timer(&timer_g, timer_handler, 0);
+    mod_timer(&timer_g, jiffies + msecs_to_jiffies (5000));
+}
+
+int
+mp2_register(ULONG pid, ULONG period, ULONG computation)
+{
+    //TODO
+    printk(KERN_INFO "registering pid %ld\n", pid);
+    return -EINVAL;
+}
+int
+mp2_yeild(ULONG pid)
+{
+    //TODO
+    printk(KERN_INFO "pid %ld is yielding \n", pid);
+    return -EINVAL;
+}
+int
+mp2_deregister(ULONG pid)
+{
+    //TODO
+    printk(KERN_INFO "deregistering pid %ld", pid);
+    return -EINVAL;
 }
 
 /*
@@ -196,6 +239,8 @@ procfile_read(
         if(nbytes != 0)
         {
             printk(KERN_ALERT "procfile_read copy_to_user failed!\n");
+            kfree(proc_buff);
+            return -EIO;
         }
 
         kfree(proc_buff);
@@ -208,7 +253,7 @@ int
 procfile_write(
     struct file *file,
     const char *buffer,
-    unsigned long count,
+    ULONG count,
     void *data
     )
 {
@@ -217,43 +262,65 @@ procfile_write(
 
     debugk(KERN_INFO "/proc/%s was written to!\n", FULL_PROC);
     /* get buffer size */
-    procfs_buffer_size = count;
-    if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
-        procfs_buffer_size = PROCFS_MAX_SIZE;
+    procfs_buffer_size_g = count;
+    if (procfs_buffer_size_g > PROCFS_MAX_SIZE ) {
+        procfs_buffer_size_g = PROCFS_MAX_SIZE;
     }
 
     /* write data to the buffer */
-    if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+    if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size_g) ) {
         return -EFAULT;
     }
 
     char* procfs_buffer_ptr = procfs_buffer;
 
-    char* register_yield = strsep(&procfs_buffer_ptr, split);
+    char* register_action = strsep(&procfs_buffer_ptr, split);
     char* pid_str = strsep(&procfs_buffer_ptr, split);
-    char* period = strsep(&procfs_buffer_ptr, split);
-    char* time_of_computation = strsep(&procfs_buffer_ptr, split);
-    if(time_of_computation == '\0')
+    char* period_str = strsep(&procfs_buffer_ptr, split);
+    char* computation_str = strsep(&procfs_buffer_ptr, split);
+
+    ULONG pid = simple_strtol(pid_str, NULL, 10);
+    ULONG period = simple_strtol(period_str, NULL, 10);
+    ULONG computation = simple_strtol(computation_str, NULL, 10);
+
+    if(!pid)
     {
-        printk(KERN_ALERT "Malformed procfs write, not registering/yeilding/de-regsitering");
-        return -1;
+        printk(KERN_ALERT "malformed PID\n");
+        return -EINVAL;
     }
 
-    printk("%s", pid_str);
-    printk("%s", period);
-    printk("%s", time_of_computation);
+    if(pid_str[0] == '\0' || (register_action[0] == 'R' && computation_str[0] == '\0'))
+    {
+        printk(KERN_ALERT "Malformed procfs write, not registering/yeilding/de-regsitering\n");
+        return -EINVAL;
+    }
+
+    int ret = 0;
+    if( register_action[0] == 'R' )
+    {
+        printk(KERN_INFO "Registering PID %ld, period: %ld, comp: %ld\n", pid, period, computation);
+        ret = mp2_register(pid, period, computation);
+    }
+    else if ( register_action[0] == 'Y' )
+    {
+        ret = mp2_yeild(pid);
+    }
+    else if ( register_action[0] == 'D' )
+    {
+        ret = mp2_deregister(pid);
+    }
+    else
+    {
+        printk(KERN_ALERT "Registration operation not valid\n");
+        ret = -EINVAL;
+    }
+    if(ret)
+    {
+        return ret;
+    }
 
 
-    //TODO: Register the entry
-
-//    pid_from_proc_file = simple_strtol(procfs_buffer, NULL, 10);
-//
-//    debugk(KERN_INFO "PID from process is: %d\n", pid_from_proc_file);
-//
-//    mp2_add_pid_to_list(pid_from_proc_file);
-//    debugk(KERN_INFO "PID:%s, registered.\n", procfs_buffer);
-
-    return procfs_buffer_size;
+    return procfs_buffer_size_g;
 }
 
 
@@ -284,8 +351,8 @@ my_module_init(void)
     printk(KERN_INFO "/proc/%s created\n", FULL_PROC);
 
     //SETUP TIMER
-//    setup_timer ( &timer, timer_handler, 0);
-//    mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
+//    setup_timer ( &timer_g, timer_handler, 0);
+//    mod_timer ( &timer_g, jiffies + msecs_to_jiffies (5000) );
 
 //    start_kthread();
     return 0;
@@ -299,7 +366,7 @@ my_module_exit(void)
     mp2_destroy_process_list();
     //stop_kthread();
 
-    //del_timer ( &timer );
+    //del_timer ( &timer_g );
     printk(KERN_INFO "MODULE UNLOADED\n");
 }
 
@@ -310,7 +377,7 @@ void
 start_kthread(void)
 {
     debugk(KERN_INFO "Starting up kernel thread!\n");
-    thread = kthread_run(&thread_function,  NULL, THREAD_NAME);
+    thread_g = kthread_run(&thread_function,  NULL, THREAD_NAME);
 }
 
 /*
@@ -319,7 +386,7 @@ start_kthread(void)
 void
 stop_kthread(void)
 {
-    kthread_stop(thread);
+    kthread_stop(thread_g);
 }
 
 /*
