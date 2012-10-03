@@ -90,7 +90,7 @@ mp2_destroy_process_list(){
         list_del(&task_data->list_node);
         if(task_data->state == RUNNING)
         {
-            del_timer(task_data->wakeup_timer);
+            //del_timer(task_data->wakeup_timer);
         }
         kfree(task_data->wakeup_timer);
         kfree(task_data);
@@ -220,7 +220,7 @@ mp2_deregister(ULONG pid)
             list_del(&task_data->list_node);
             if(task_data->state == RUNNING)
             {
-                del_timer(task_data->wakeup_timer);
+                //TODO: del_timer(task_data->wakeup_timer);
             }
             kfree(task_data->wakeup_timer);
             kfree(task_data);
@@ -300,15 +300,7 @@ procfile_write(
     char* period_str = strsep(&procfs_buffer_ptr, split);
     char* computation_str = strsep(&procfs_buffer_ptr, split);
 
-    ULONG pid = simple_strtol(pid_str, NULL, 10);
-    ULONG period = simple_strtol(period_str, NULL, 10);
-    ULONG computation = simple_strtol(computation_str, NULL, 10);
 
-    if(!pid)
-    {
-        printk(KERN_ALERT "malformed PID\n");
-        return -EINVAL;
-    }
 
     if(pid_str[0] == '\0' || (register_action[0] == 'R' && computation_str[0] == '\0'))
     {
@@ -316,9 +308,19 @@ procfile_write(
         return -EINVAL;
     }
 
+    ULONG pid = simple_strtol(pid_str, NULL, 10);
+
+    if(!pid)
+    {
+        printk(KERN_ALERT "malformed PID\n");
+        return -EINVAL;
+    }
+
     int ret = 0;
     if( register_action[0] == 'R' )
     {
+        ULONG period = simple_strtol(period_str, NULL, 10);
+        ULONG computation = simple_strtol(computation_str, NULL, 10);
         ret = mp2_register(pid, period, computation);
     }
     else if ( register_action[0] == 'Y' )
