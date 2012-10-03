@@ -7,6 +7,7 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <asm/uaccess.h>
+#include <linux/limits.h>
 
 #include <linux/sched.h>
 #include <linux/kthread.h>
@@ -44,7 +45,7 @@ static ULONG procfs_buffer_size_g = 0; //size of buffer
 
 typedef struct mp2_task_struct{
     struct task_struct* linux_task;
-    struct timer_list wakeup_timer;
+    struct timer_list* wakeup_timer;
     int state;
     ULONG PID;
     ULONG period;
@@ -63,9 +64,7 @@ LIST_HEAD(process_list_g);
 DEFINE_MUTEX(process_list_mutex_g);
 
 //Function Prototypes
-void mp2_init_process_list(void);
 void mp2_destroy_process_list(void);
-void mp2_add_pid_to_list(ULONG pid, ULONG period, ULONG proc_time);
 void mp2_update_process_times(void);
 void mp2_update_process_times_unsafe(void);
 UINT mp2_get_process_times(char ** process_times);
@@ -76,45 +75,26 @@ int mp2_register(ULONG pid, ULONG period, ULONG computation);
 int mp2_yeild(ULONG pid);
 int mp2_deregister(ULONG pid);
 
-void
-mp2_init_process_list(){
-    //TODO: Initialize list.  May not be needed due to LIST_HEAD macro
-}
 
 /**
  * Delete linked list. Call after removing procfs entries
  */
 void
 mp2_destroy_process_list(){
-    process_data_t * pid_data = NULL;
-    process_data_t * temp_pid_data = NULL;
+    task_struct_t * task_data = NULL;
+    task_struct_t * temp_task_data = NULL;
     mutex_lock(&process_list_mutex_g);
-    list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node)
+    //TODO: what do we do with the running/blocked processes?
+    list_for_each_entry_safe(task_data, temp_task_data, &process_list_g, list_node)
     {
-        list_del(&pid_data->list_node);
-        kfree(pid_data);
+        list_del(&task_data->list_node);
+        if(task_data->state == RUNNING)
+        {
+            del_timer(task_data->wakeup_timer);
+        }
+        kfree(task_data->wakeup_timer);
+        kfree(task_data);
     }
-    mutex_unlock(&process_list_mutex_g);
-}
-
-/**
- * Register a new pid when a process registers itself
- */
-void
-mp2_add_pid_to_list(ULONG pid, ULONG period, ULONG proc_time){
-    task_struct_t * new_pid_data;
-
-    mutex_lock(&process_list_mutex_g);
-    new_pid_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
-    new_pid_data->PID = pid;
-    new_pid_data->state = SLEEPING;
-    new_pid_data->period = period;
-    new_pid_data->proc_time = proc_time;
-
-    INIT_LIST_HEAD(&new_pid_data->list_node);
-
-    list_add_tail(&new_pid_data->list_node, &process_list_g);
-
     mutex_unlock(&process_list_mutex_g);
 }
 
@@ -123,17 +103,18 @@ mp2_add_pid_to_list(ULONG pid, ULONG period, ULONG proc_time){
  */
 void
 mp2_update_process_times(){
+    //TODO remove this
     mutex_lock(&process_list_mutex_g);
     mp2_update_process_times_unsafe();
     mutex_unlock(&process_list_mutex_g);
 }
-
 
 /**
  * Unsafe version of update function.
  */
 void
 mp2_update_process_times_unsafe(){
+    //TODO remove this
     process_data_t * pid_data = NULL;
     list_for_each_entry(pid_data, &process_list_g, list_node)
     {
@@ -157,17 +138,19 @@ mp2_update_process_times_unsafe(){
  */
 UINT
 mp2_get_process_times(char ** process_times){
+    //TODO: remove or update this
     UINT index = 0;
-    process_data_t * pid_data;
+    task_struct_t * pid_data;
 
     mutex_lock(&process_list_mutex_g);
 
-    *process_times = (char *)kmalloc(2048, GFP_KERNEL);
+    *process_times = (char *)kmalloc(MAX_INPUT * sizeof(char), GFP_KERNEL);
     *process_times[0] = '\0';
 
     list_for_each_entry(pid_data, &process_list_g, list_node)
     {
-        index += sprintf(*process_times+index, "%d: %lu\n", pid_data->process_id, pid_data->cpu_time);
+        index += sprintf(*process_times+index, "%ld: Period:%ld Comptation %ld\n",
+                pid_data->PID, pid_data->period, pid_data->proc_time);
     }
     mutex_unlock(&process_list_mutex_g);
     return index;
@@ -177,7 +160,7 @@ mp2_get_process_times(char ** process_times){
 void
 timer_handler(ULONG pid)
 {
-    printk(KERN_INFO "TIMER RUN!!!" );
+    printk(KERN_INFO "Timer run for pid: %ld", pid);
 
     //TODO: set the pid state to ready and call dispatch thread
 
@@ -186,11 +169,31 @@ timer_handler(ULONG pid)
 }
 
 int
-mp2_register(ULONG pid, ULONG period, ULONG computation)
+mp2_register(ULONG pid, ULONG period, ULONG proc_time)
 {
-    //TODO
+    //TODO test this, check for errors and return error codes
     printk(KERN_INFO "registering pid %ld\n", pid);
-    return -EINVAL;
+    task_struct_t * new_pid_data;
+
+    new_pid_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
+    new_pid_data->linux_task = find_task_by_pid(pid);
+    new_pid_data->PID = pid;
+    new_pid_data->state = SLEEPING;
+    new_pid_data->period = period;
+    new_pid_data->proc_time = proc_time;
+    new_pid_data->wakeup_timer = (struct timer_list *)kmalloc(sizeof(struct timer_list), GFP_KERNEL);
+    //TODO: clean up memory from timers
+    //TODO: setup_timer(new_pid_data->wakeup_timer, timer_handler, new_pid_data->PID);
+
+    mutex_lock(&process_list_mutex_g);
+
+    INIT_LIST_HEAD(&new_pid_data->list_node);
+
+    list_add_tail(&new_pid_data->list_node, &process_list_g);
+
+    mutex_unlock(&process_list_mutex_g);
+
+    return 0;
 }
 int
 mp2_yeild(ULONG pid)
@@ -223,24 +226,21 @@ procfile_read(
     int ret;
     char * proc_buff = NULL;
 
-    debugk(KERN_INFO "reading from procfile\n");
+    printk(KERN_INFO "reading from procfile\n");
 
     if (offset > 0) {
         /* we have finished to read, return 0 */
         ret  = 0;
     } else {
-        /* fill the buffer, return the buffer size */
-        int num_copied = mp2_get_process_times(&proc_buff);
-        //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
+
+        mp2_get_process_times(&proc_buff); // TODO: may want to check return?
         int nbytes = sprintf(buffer, "%s", proc_buff);
-        debugk(KERN_INFO "num_coppied: %d", num_copied);
-        debugk(KERN_INFO "%snbytes: %d\n", proc_buff, nbytes);
 
         if(nbytes != 0)
         {
-            printk(KERN_ALERT "procfile_read copy_to_user failed!\n");
+            printk(KERN_ALERT "procfile_read failed!\n");
             kfree(proc_buff);
-            return -EIO;
+            return -EFAULT;
         }
 
         kfree(proc_buff);
@@ -350,11 +350,6 @@ my_module_init(void)
 
     printk(KERN_INFO "/proc/%s created\n", FULL_PROC);
 
-    //SETUP TIMER
-//    setup_timer ( &timer_g, timer_handler, 0);
-//    mod_timer ( &timer_g, jiffies + msecs_to_jiffies (5000) );
-
-//    start_kthread();
     return 0;
 }
 
@@ -364,7 +359,6 @@ my_module_exit(void)
     remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
     mp2_destroy_process_list();
-    //stop_kthread();
 
     //del_timer ( &timer_g );
     printk(KERN_INFO "MODULE UNLOADED\n");
