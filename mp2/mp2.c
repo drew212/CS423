@@ -88,7 +88,6 @@ mp2_destroy_process_list(){
 
         del_timer(&task_data->wakeup_timer);
 
-
         kfree(task_data);
     }
     mutex_unlock(&process_list_mutex_g);
@@ -319,12 +318,12 @@ procfile_read(
     int ret;
     char * proc_buff = NULL;
 
-    printk(KERN_INFO "reading from procfile\n");
 
     if (offset > 0) {
         /* we have finished to read, return 0 */
         ret  = 0;
     } else {
+        printk(KERN_INFO "reading from procfile\n");
 
         mp2_get_process_times(&proc_buff); // TODO: may want to check return?
         //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
