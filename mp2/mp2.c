@@ -69,7 +69,7 @@ void stop_kthread(void);
 int mp2_register(ULONG pid, ULONG period, ULONG computation);
 int mp2_yield(ULONG pid);
 int mp2_deregister(ULONG pid);
-void set_pid_ready(ULONG pid);
+void set_pid_ready(task_struct_t*  pid);
 bool mp2_admission_control(ULONG period, ULONG proc_time);
 void mp2_set_timer(task_struct_t * process);
 
@@ -96,6 +96,7 @@ mp2_destroy_process_list(){
 void
 mp2_update_tasks(void)
 {
+    printk(KERN_INFO "Updating tasks\n");
     task_struct_t * curr_process = NULL;
     task_struct_t * next_process = NULL;
     task_struct_t * process_to_remove = NULL;
@@ -110,9 +111,13 @@ mp2_update_tasks(void)
             {
                 next_process = curr_process;
             }
-            if(running_process_g->state == RUNNING)
+            if(running_process_g != NULL && running_process_g->state == RUNNING)
             {
                 running_process_g->state = READY;
+            }
+            else if(running_process_g == NULL)
+            {
+                next_process = curr_process;
             }
         }
     }
@@ -124,19 +129,22 @@ mp2_update_tasks(void)
     }
     next_process->state = RUNNING;
 
-    if(running_process_g->PID != next_process->PID)
+    if(running_process_g != NULL && running_process_g->PID != next_process->PID)
     {
+        printk(KERN_INFO "Preempting the current process\n");
         // Preempt the currently running task
         struct sched_param sparam_remove;
         sparam_remove.sched_priority = 0;
         sched_setscheduler(running_process_g->linux_task, SCHED_NORMAL, &sparam_remove);
 
+        printk(KERN_INFO "Setting the next task to running and scheduling it\n");
         // Set state of new task to running and schedule it
         struct sched_param sparam_schedule;
         wake_up_process(next_process->linux_task);
         sparam_schedule.sched_priority=MAX_USER_RT_PRIO-1;
         sched_setscheduler(next_process->linux_task, SCHED_FIFO, &sparam_schedule);
     }
+    running_process_g = next_process;
 
     mutex_unlock(&process_list_mutex_g);
 }
@@ -168,11 +176,12 @@ mp2_get_process_times(char ** process_times){
 
 
 void
-timer_handler(ULONG pid)
+timer_handler(task_struct_t* pid)
 {
     printk(KERN_INFO "Timer run for pid: %ld", pid);
 
     // Set the pid state to ready and call dispatch thread
+    mp2_set_timer(pid);
     set_pid_ready(pid);
 
     wake_up_process(thread_g);
@@ -204,9 +213,9 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
 
     list_add_tail(&new_task_data->list_node, &process_list_g);
 
-    mp2_set_timer(new_task_data);
-
     mutex_unlock(&process_list_mutex_g);
+
+    mp2_set_timer(new_task_data);
 
     return 0;
 }
@@ -215,7 +224,7 @@ void
 mp2_set_timer(task_struct_t * process)
 {
     printk(KERN_INFO "PID: %ld, timer reset", process->PID);
-    setup_timer(&process->wakeup_timer, timer_handler, process->PID);
+    setup_timer(&process->wakeup_timer, timer_handler, process);
     mod_timer(&process->wakeup_timer, jiffies + msecs_to_jiffies (process->period));
 }
 
@@ -258,6 +267,10 @@ mp2_deregister(ULONG pid)
             list_del(&task_data->list_node);
 
             del_timer(&task_data->wakeup_timer);
+            if(task_data == running_process_g)
+            {
+                running_process_g = NULL;
+            }
 
             kfree(&task_data->wakeup_timer);
             kfree(task_data);
@@ -289,25 +302,12 @@ mp2_admission_control(ULONG period, ULONG proc_time)
 }
 
 void
-set_pid_ready(ULONG pid)
+set_pid_ready(task_struct_t*  pid)
 {
-    printk(KERN_INFO "setting pid %ld ready", pid);
+    printk(KERN_INFO "setting pid %ld ready", pid->PID);
 
-    task_struct_t * task_data;
-
-    mutex_lock(&process_list_mutex_g);
-
-    list_for_each_entry(task_data, &process_list_g, list_node)
-    {
-        if(task_data->PID == pid)
-        {
-            //TODO set period for task_data accordingly
-            task_data->state = READY;
-
-            mp2_set_timer(task_data);
-        }
-    }
-    mutex_unlock(&process_list_mutex_g);
+    //TODO set period for task_data accordingly
+    pid->state = READY;
 }
 
 /*
