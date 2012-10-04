@@ -55,6 +55,8 @@ DEFINE_MUTEX(process_list_mutex_g);
 int thread_function(void * data);
 void start_kthread(void);
 void stop_kthread(void);
+void mp3_register_process(int pid);
+void mp3_unregister_process(int pid);
 
 /**
  * Delete linked list. Call after removing procfs entries
@@ -76,12 +78,12 @@ mp3_destroy_process_list(){
 
 
 /**
- * Register a new pid when a process registers itself
+ * Register a new task when a process registers itself
  */
 /*
 void
-mp3_add_pid_to_list(int pid){
-    process_data_t * new_pid_data;
+mp3_add_task_to_list(int pid){
+    task_struct_t * new_task;
 
     mutex_lock(&process_list_mutex_g);
 
