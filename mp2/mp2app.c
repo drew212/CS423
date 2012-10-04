@@ -42,8 +42,8 @@ int is_registered(int my_pid)
 }
 
 //TODO Write comments
-void yield(int my_pid){
-    printf("%d: yielding...\n", my_pid);
+void yield(int my_pid, unsigned int period, unsigned int computation){
+    printf("%d: yielding for: %ld\n", my_pid, period - computation);
     char string[100];
     sprintf(string, "echo \'Y:%d\' > /proc/mp2/status", my_pid);
     system(string);
@@ -106,7 +106,7 @@ int main()
     printf("%d: Registered! \n", my_pid);
 
     unsigned int iterations = get_iterations();
-    yield(my_pid);
+    yield(my_pid, period, computation_time);
 
     while(iterations > 0)
     {
@@ -126,7 +126,7 @@ int main()
             time_elapsed = time.tv_usec - start_time;
         }
 
-        yield(my_pid);
+        yield(my_pid, period, computation_time);
         iterations--;
     }
 

@@ -103,16 +103,18 @@ mp2_update_tasks(void)
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(curr_process, &process_list_g, list_node)
     {
-        if(curr_process != NULL)
+        if(curr_process != NULL && curr_process == READY)
         {
+            printk(KERN_INFO "PID: %ld ready", curr_process->PID);
             // Find the task with state == READY and shortest period
-            if(next_process == NULL || (curr_process->state == READY && next_process->period > curr_process->period))
+            if(next_process == NULL || (next_process->period > curr_process->period))
             {
                 next_process = curr_process;
             }
             if(running_process_g != NULL && running_process_g->state == RUNNING)
             {
                 running_process_g->state = READY;
+                next_process = running_process_g;
             }
             else if(running_process_g == NULL)
             {
@@ -123,25 +125,36 @@ mp2_update_tasks(void)
 
     if(next_process == NULL)
     {
+        printk(KERN_INFO "Next process null\n");
         mutex_unlock(&process_list_mutex_g);
         return;
     }
     next_process->state = RUNNING;
 
-    if(running_process_g != NULL && running_process_g->PID != next_process->PID)
+    if(curr_process->PID != next_process->PID)
     {
-        // Preempt the currently running task
+        printk(KERN_INFO "preempting: %ld, for %ld", curr_process->PID, next_process->PID);
+
         struct sched_param sparam_remove;
         struct sched_param sparam_schedule;
-        printk(KERN_INFO "Preempting the current process\n");
 
-        sparam_remove.sched_priority = 0;
-        sched_setscheduler(running_process_g->linux_task, SCHED_NORMAL, &sparam_remove);
+        task_struct_t * prev_running = running_process_g;
+        running_process_g = curr_process;
+
+        if(prev_running != NULL)
+        {
+            printk(KERN_INFO "Preempting the current process\n");
+            // Preempt the currently running task
+            //sparam_remove.sched_priority = 0;
+            sparam_remove.sched_priority = MAX_USER_RT_PRIO - 1;
+            sched_setscheduler(prev_running->linux_task, SCHED_NORMAL, &sparam_remove);
+        }
 
         printk(KERN_INFO "Setting the next task to running and scheduling it\n");
         // Set state of new task to running and schedule it
         wake_up_process(next_process->linux_task);
-        sparam_schedule.sched_priority=MAX_USER_RT_PRIO-1;
+        //sparam_schedule.sched_priority= MAX_USER_RT_PRIO - 1;
+        sparam_schedule.sched_priority=0;
         sched_setscheduler(next_process->linux_task, SCHED_FIFO, &sparam_schedule);
     }
     running_process_g = next_process;
@@ -231,7 +244,7 @@ mp2_set_timer(task_struct_t * process)
 int
 mp2_yield(ULONG pid)
 {
-
+    //struct sched_param sparam_remove;
     task_struct_t * task_data;
     printk(KERN_INFO "pid %ld is yielding \n", pid);
 
@@ -243,6 +256,8 @@ mp2_yield(ULONG pid)
         {
             set_task_state(task_data->linux_task, TASK_UNINTERRUPTIBLE);
             task_data->state = SLEEPING;
+            //sparam_remove.sched_priority = 0;
+            //sched_setscheduler(task_data->linux_task, SCHED_NORMAL, &sparam_remove);
         }
     }
     mutex_unlock(&process_list_mutex_g);
@@ -263,7 +278,6 @@ mp2_deregister(ULONG pid)
     {
         if(task_data->PID == pid)
         {
-            list_del(&task_data->list_node);
 
             del_timer(&task_data->wakeup_timer);
             if(task_data == running_process_g)
@@ -271,7 +285,7 @@ mp2_deregister(ULONG pid)
                 running_process_g = NULL;
             }
 
-            kfree(&task_data->wakeup_timer);
+            list_del(&task_data->list_node);
             kfree(task_data);
         }
     }
@@ -304,8 +318,6 @@ void
 set_pid_ready(task_struct_t*  pid)
 {
     printk(KERN_INFO "setting pid %ld ready", pid->PID);
-
-    //TODO set period for task_data accordingly
     pid->state = READY;
 }
 
