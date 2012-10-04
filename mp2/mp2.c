@@ -103,16 +103,18 @@ mp2_update_tasks(void)
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(curr_process, &process_list_g, list_node)
     {
-        if(curr_process != NULL && curr_process == READY)
+        if(curr_process != NULL && curr_process->state == READY)
         {
-            printk(KERN_INFO "PID: %ld ready", curr_process->PID);
+            debugk(KERN_INFO "PID: %ld ready\n", curr_process->PID);
             // Find the task with state == READY and shortest period
             if(next_process == NULL || (next_process->period > curr_process->period))
             {
+                debugk(KERN_INFO "setting next_proc to curr_proc\n");
                 next_process = curr_process;
             }
             if(running_process_g != NULL && running_process_g->state == RUNNING)
             {
+                debugk(KERN_INFO "setting running process status to ready\n");
                 running_process_g->state = READY;
                 next_process = running_process_g;
             }
