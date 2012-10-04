@@ -12,11 +12,13 @@
 #include <linux/sched.h>
 #include <linux/kthread.h>
 
+#include "mp2_given.h"
+#include "mp3_given.h"
+
 #define PROC_DIR_NAME "mp3"
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
 #define FULL_PROC "status/mp3"
-#define THREAD_NAME "mp3_task_thread"
 
 #define DEBUG
 
@@ -27,8 +29,7 @@
 struct proc_dir_entry* mp3_proc_dir_g;
 struct proc_dir_entry* proc_file_g;
 
-static struct timer_list timer;
-struct task_struct * thread;
+static struct timer_list timer_g;
 
 struct proc_dir_entry* mp3_proc_dir_g;
 static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
@@ -36,8 +37,9 @@ static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 static ulong procfs_buffer_size_g = 0; //size of buffer
 
 typedef struct process_data{
-    int process_id;
-    ulong cpu_time;
+    int PID;
+    struct task_struct* linux_task;
+
     struct list_head list_node;
 } process_data_t;
 
@@ -45,20 +47,13 @@ LIST_HEAD(process_list_g);
 DEFINE_MUTEX(process_list_mutex_g);
 
 //Function Prototypes
-//void mp3_init_process_list(void);
-//void mp3_destroy_process_list(void);
-//void mp3_add_pid_to_list(int pid);
-//void mp3_update_process_times(void);
-//void mp3_update_process_times_unsafe(void);
-//uint mp3_get_process_times(char ** process_times);
-int thread_function(void * data);
-void start_kthread(void);
-void stop_kthread(void);
+void mp3_destroy_process_list(void);
+void mp3_add_pid_to_list(int pid);
+void mp3_remove_pid_from_list(int pid);
 
 /**
  * Delete linked list. Call after removing procfs entries
  */
-/*
 void
 mp3_destroy_process_list(){
     process_data_t * pid_data = NULL;
@@ -71,13 +66,11 @@ mp3_destroy_process_list(){
     }
     mutex_unlock(&process_list_mutex_g);
 }
-*/
 
 
 /**
  * Register a new pid when a process registers itself
  */
-/*
 void
 mp3_add_pid_to_list(int pid){
     process_data_t * new_pid_data;
@@ -85,87 +78,46 @@ mp3_add_pid_to_list(int pid){
     mutex_lock(&process_list_mutex_g);
 
     new_pid_data = (process_data_t *)kmalloc(sizeof(process_data_t), GFP_KERNEL);
-    new_pid_data->process_id = pid;
-    new_pid_data->cpu_time = 0;
+
+    new_pid_data->linux_task = find_task_by_pid(pid);
+    new_pid_data->PID = pid;
+
     INIT_LIST_HEAD(&new_pid_data->list_node);
 
     list_add_tail(&new_pid_data->list_node, &process_list_g);
 
-    mp3_update_process_times_unsafe();
-
     mutex_unlock(&process_list_mutex_g);
 }
-*/
 
-/**
- * Called by kernel thread to update process information in linked list
- */
-/*
 void
-mp3_update_process_times(){
-    mutex_lock(&process_list_mutex_g);
-    mp3_update_process_times_unsafe();
-    mutex_unlock(&process_list_mutex_g);
-}
-*/
-
-/**
- * Unsafe version of update function.
- */
-/*
-void
-mp3_update_process_times_unsafe(){
+mp3_remove_pid_from_list(int pid)
+{
     process_data_t * pid_data = NULL;
-    list_for_each_entry(pid_data, &process_list_g, list_node)
-    {
-        ulong cpu_time;
-        if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
-        {
-            pid_data->cpu_time = cpu_time;
-            printk(KERN_INFO "pid: %d, cpu: %lu", pid_data->process_id, pid_data->cpu_time);
-        }
-        else
-        {
-            // If get_cpu returns an error, we don't know what to do
-            printk(KERN_ALERT "pid %d returns error with get_cpu_use()", pid_data->process_id);
-        }
-    }
-}
-*/
-
-/**
- * Retrieves a formatted string of process info.  Returns length of string.
- * Be sure to kfree this string when you are done with it!
- */
-/*
-uint
-mp3_get_process_times(char ** process_times){
-    uint index = 0;
-    process_data_t * pid_data;
+    process_data_t * temp_pid_data = NULL;
 
     mutex_lock(&process_list_mutex_g);
-
-    *process_times = (char *)kmalloc(2048, GFP_KERNEL);
-    *process_times[0] = '\0';
-
-    list_for_each_entry(pid_data, &process_list_g, list_node)
+    list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node)
     {
-        index += sprintf(*process_times+index, "%d: %lu\n", pid_data->process_id, pid_data->cpu_time);
+        if(pid_data->PID == pid)
+        {
+            list_del(&pid_data->list_node);
+            kfree(pid_data);
+            //TODO: Can we mutex unlock and return here so we don't go through the whole list?
+        }
     }
     mutex_unlock(&process_list_mutex_g);
-    return index;
+
 }
-*/
 
 void
 timer_handler(ulong data)
 {
     printk(KERN_INFO "TIMER RUN!!!" );
 
-    wake_up_process(thread);
+    //TODO: Timer stuff
 
-    setup_timer(&timer, timer_handler, 0);
-    mod_timer(&timer, jiffies + msecs_to_jiffies (5000));
+    setup_timer(&timer_g, timer_handler, 0);
+    mod_timer(&timer_g, jiffies + msecs_to_jiffies (5000));
 }
 
 /*
@@ -173,13 +125,13 @@ timer_handler(ulong data)
  */
 int
 procfile_read(
-    char * buffer,
-    char ** buffer_location,
-    off_t offset,
-    int buffer_length,
-    int * eof,
-    void * data
-    )
+        char * buffer,
+        char ** buffer_location,
+        off_t offset,
+        int buffer_length,
+        int * eof,
+        void * data
+        )
 {
     int ret;
     char * proc_buff = NULL;
@@ -210,11 +162,11 @@ procfile_read(
 
 int
 procfile_write(
-    struct file *file,
-    const char *buffer,
-    ulong count,
-    void *data
-    )
+        struct file *file,
+        const char *buffer,
+        ulong count,
+        void *data
+        )
 {
     const char split[] = " ";
     char* procfs_buffer_ptr;
@@ -222,10 +174,6 @@ procfile_write(
     char* action;
     char* pid_str;
     ulong pid;
-    int ret;
-    ulong period;
-    ulong computation;
-    
 
     //
     // Gather input that has been written
@@ -241,7 +189,6 @@ procfile_write(
         printk(KERN_ALERT "Error in copy_from_user!\n");
         return -EFAULT;
     }
-    
 
     procfs_buffer_ptr = procfs_buffer;
 
@@ -263,9 +210,18 @@ procfile_write(
         return -EINVAL;
     }
 
+    pid = simple_strtol(pid_str, NULL, 10);
+
+    if(!pid)
+    {
+        printk(KERN_ALERT "Malformed PID\n");
+        return -EINVAL;
+    }
+
     if(action[0] == 'R')
     {
-        //TODO: Register
+        mp3_add_pid_to_list(pid);
+        debugk(KERN_INFO "PID:%s, registered.\n", procfs_buffer);
     }
     else if(action[0] == 'U')
     {
@@ -278,27 +234,18 @@ procfile_write(
         return -EINVAL;
     }
 
-    pid = simple_strtol(pid_str, NULL, 10);
-
-    if(!pid)
-    {
-        printk(KERN_ALERT "Malformed PID\n");
-        return -EINVAL;
-    }
-
-    //mp3_add_pid_to_list(pid_from_proc_file);
-    debugk(KERN_INFO "PID:%s, registered.\n", procfs_buffer);
 
     return procfs_buffer_size_g;
 }
-
 
 int __init
 my_module_init(void)
 {
     printk(KERN_INFO "MODULE LOADED\n");
 
+    //
     //Setup /proc/mp3/status
+    //
     mp3_proc_dir_g = proc_mkdir(PROC_DIR_NAME, NULL);
     proc_file_g = create_proc_entry(PROCFS_NAME, 0666, mp3_proc_dir_g);
 
@@ -319,10 +266,9 @@ my_module_init(void)
     printk(KERN_INFO "/proc/%s created\n", FULL_PROC);
 
     //SETUP TIMER
-    setup_timer ( &timer, timer_handler, 0);
-    mod_timer ( &timer, jiffies + msecs_to_jiffies (5000) );
+    setup_timer ( &timer_g, timer_handler, 0);
+    mod_timer ( &timer_g, jiffies + msecs_to_jiffies (5000) );
 
-    start_kthread();
     return 0;
 }
 
@@ -331,50 +277,11 @@ my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp3_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
-    //mp3_destroy_process_list();
-    stop_kthread();
+    mp3_destroy_process_list();
 
-    del_timer ( &timer );
+    del_timer ( &timer_g );
     printk(KERN_INFO "MODULE UNLOADED\n");
 }
-
-/*
- * Starts the kernel thread
- */
-void
-start_kthread(void)
-{
-    debugk(KERN_INFO "Starting up kernel thread!\n");
-    thread = kthread_run(&thread_function,  NULL, THREAD_NAME);
-}
-
-/*
- * Stops the kernel thread
- */
-void
-stop_kthread(void)
-{
-    kthread_stop(thread);
-}
-
-/*
- * This is the function that executes when the thread is run.
- */
-int
-thread_function(void * data)
-{
-    while(1)
-    {
-        debugk(KERN_INFO "Thread running!\n");
-        if(kthread_should_stop())
-            return 0;
-        //mp3_update_process_times();
-        set_current_state(TASK_INTERRUPTIBLE);
-        schedule();
-    }
-    return 0;
-}
-
 
 module_init(my_module_init);
 module_exit(my_module_exit);
