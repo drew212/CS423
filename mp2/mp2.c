@@ -199,10 +199,13 @@ timer_handler(task_struct_t* pid)
     mp2_set_timer(pid);
     if(running_process_g != pid)
     {
-        printk(KERN_INFO "Running process is running across it's period\n");
         set_pid_ready(pid);
 
         wake_up_process(thread_g);
+    }
+    else
+    {
+        printk(KERN_INFO "Running process is running across it's period\n");
     }
 
 
