@@ -43,6 +43,7 @@ char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
 static ULONG procfs_buffer_size_g = 0; //size of buffer
 
+//Proces control block struct
 typedef struct mp2_task_struct{
     struct task_struct* linux_task;
     struct timer_list wakeup_timer;
@@ -211,10 +212,16 @@ timer_handler(task_struct_t* pid)
 
 }
 
+/*
+ * This function handles when a new process tries to register
+ */
 int
-mp2_register(ULONG pid, ULONG period, ULONG proc_time)
+mp2_register(
+        ULONG pid,
+        ULONG period,
+        ULONG proc_time
+        )
 {
-    //TODO test this, check for errors and return error codes
     task_struct_t * new_task_data;
     printk(KERN_INFO "Registering PID %ld, period: %ld, comp: %ld\n", pid, period, proc_time);
 
@@ -224,6 +231,7 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
         return -EBUSY;
     }
 
+    // Setup the PCB struct
     new_task_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
     new_task_data->linux_task = find_task_by_pid(pid);
     new_task_data->PID = pid;
@@ -231,6 +239,7 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
     new_task_data->period = period;
     new_task_data->proc_time = proc_time;
 
+    // Insert the new PCB into our structure so we can keep track of it
     mutex_lock(&process_list_mutex_g);
 
     INIT_LIST_HEAD(&new_task_data->list_node);
@@ -244,6 +253,9 @@ mp2_register(ULONG pid, ULONG period, ULONG proc_time)
     return 0;
 }
 
+/*
+ * Sets the timer for the task struct passed in
+ */
 void
 mp2_set_timer(task_struct_t * process)
 {
@@ -252,13 +264,16 @@ mp2_set_timer(task_struct_t * process)
     mod_timer(&process->wakeup_timer, jiffies + msecs_to_jiffies (process->period));
 }
 
+/*
+ * Yield a function from within the structure
+ */
 int
 mp2_yield(ULONG pid)
 {
-    //struct sched_param sparam_remove;
     task_struct_t * task_data;
     printk(KERN_INFO "pid %ld is yielding \n", pid);
 
+    // Search through the linked list and find the process that called yeild
     mutex_lock(&process_list_mutex_g);
 
     list_for_each_entry(task_data, &process_list_g, list_node)
@@ -267,8 +282,6 @@ mp2_yield(ULONG pid)
         {
             set_task_state(task_data->linux_task, TASK_UNINTERRUPTIBLE);
             task_data->state = SLEEPING;
-            //sparam_remove.sched_priority = 0;
-            //sched_setscheduler(task_data->linux_task, SCHED_NORMAL, &sparam_remove);
         }
     }
     running_process_g = NULL;
@@ -277,6 +290,9 @@ mp2_yield(ULONG pid)
     return 0;
 }
 
+/*
+ * Deregister the process based on PID.
+ */
 int
 mp2_deregister(ULONG pid)
 {
@@ -284,6 +300,7 @@ mp2_deregister(ULONG pid)
     task_struct_t * temp_task_data;
     printk(KERN_INFO "deregistering pid %ld", pid);
 
+    // Search through the linked listed and find the PID we want
     mutex_lock(&process_list_mutex_g);
 
     list_for_each_entry_safe(task_data, temp_task_data, &process_list_g, list_node)
@@ -305,6 +322,9 @@ mp2_deregister(ULONG pid)
     return 0;
 }
 
+/*
+ * Check if addding the process will cause utilizaiton to go past the threshold.
+ */
 bool
 mp2_admission_control(ULONG period, ULONG proc_time)
 {
@@ -312,12 +332,13 @@ mp2_admission_control(ULONG period, ULONG proc_time)
 
     task_struct_t * task_data;
 
+    // Iterate through the list adding up the thresholds
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(task_data, &process_list_g, list_node)
     {
         utilization += (double)task_data->proc_time / task_data->period;
     }
-    utilization += proc_time / period;
+    utilization += (double)proc_time / period;
     mutex_unlock(&process_list_mutex_g);
 
     if(utilization < 0.693)
@@ -326,6 +347,9 @@ mp2_admission_control(ULONG period, ULONG proc_time)
 
 }
 
+/*
+ * Set the task to ready
+ */
 void
 set_pid_ready(task_struct_t*  pid)
 {
@@ -351,22 +375,18 @@ procfile_read(
     char * proc_buff = NULL;
 
 
-    if (offset > 0) {
-        /* we have finished to read, return 0 */
+    if(offset > 0){
+        // we have finished reading, return 0
         ret  = 0;
-    } else {
+    }
+    else
+    {
         printk(KERN_INFO "reading from procfile\n");
 
-        mp2_get_process_times(&proc_buff); // TODO: may want to check return?
-        //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
+        mp2_get_process_times(&proc_buff);
+
         nbytes = sprintf(buffer, "%s", proc_buff);
         printk(KERN_INFO "trying to print:%s", proc_buff);
-
-        if(nbytes != 0)
-        {
-            //printk(KERN_ALERT "procfile_read failed!\n");
-            //TODO: i don't know what to do here, sprintf is returning 0 always, but it is writing to the buffer
-        }
 
         kfree(proc_buff);
         ret = nbytes;
@@ -374,6 +394,10 @@ procfile_read(
     return ret;
 }
 
+/*
+ * Called when a process writes to /proc/mp2/status, handles registration, deregistration and
+ * yeilding of processes that are registered.
+ */
 int
 procfile_write(
         struct file *file,
@@ -395,14 +419,17 @@ procfile_write(
     ULONG computation;
 
 
+
+    //
+    // Gather input that has been written
+    //
     debugk(KERN_INFO "/proc/%s was written to!\n", FULL_PROC);
-    /* get buffer size */
+
     procfs_buffer_size_g = count;
     if (procfs_buffer_size_g > PROCFS_MAX_SIZE ) {
         procfs_buffer_size_g = PROCFS_MAX_SIZE;
     }
 
-    /* write data to the buffer */
     if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size_g) ) {
         return -EFAULT;
     }
@@ -415,7 +442,9 @@ procfile_write(
     computation_str = strsep(&procfs_buffer_ptr, split);
 
 
-
+    //
+    // Validate input from procfile write
+    //
     if(pid_str[0] == '\0' || (register_action[0] == 'R' && computation_str[0] == '\0'))
     {
         printk(KERN_ALERT "Malformed procfs write, not registering/yielding/de-regsitering\n");
@@ -430,17 +459,25 @@ procfile_write(
         return -EINVAL;
     }
 
+    //
+    //Check the output and perform associated action
+    //
+
     ret = 0;
+
+    // Register a new process
     if( register_action[0] == 'R' )
     {
         period = simple_strtol(period_str, NULL, 10);
         computation = simple_strtol(computation_str, NULL, 10);
         ret = mp2_register(pid, period, computation);
     }
+    // Yield the process
     else if ( register_action[0] == 'Y' )
     {
         ret = mp2_yield(pid);
     }
+    // Deregister the process
     else if ( register_action[0] == 'D' )
     {
         ret = mp2_deregister(pid);
@@ -460,7 +497,10 @@ procfile_write(
 }
 
 
-    int __init
+/*
+ * Initialize the module, called when module is loaded
+ */
+int __init
 my_module_init(void)
 {
     printk(KERN_INFO "MODULE LOADED\n");
@@ -491,7 +531,10 @@ my_module_init(void)
     return 0;
 }
 
-    void __exit
+/*
+ * Exit the module, clean up memory, called when the module is removed
+ */
+void __exit
 my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
@@ -525,9 +568,7 @@ stop_kthread(void)
 }
 
 /*
- * This is the function that executes when the thread is run.
- * After start wake up with:
- * wake_up_process(thread);
+ * This is the function that executes when the thread is run/woken up
  */
     int
 thread_function(void * data)

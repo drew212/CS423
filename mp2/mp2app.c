@@ -13,8 +13,8 @@
 /**
  * Range for the number of periods the process computes factorials
  */
-#define MIN_ITERATIONS 100
-#define MAX_ITERATIONS 3000
+#define MIN_ITERATIONS 50
+#define MAX_ITERATIONS 100
 
 long int factorial(unsigned long int num);
 
@@ -58,7 +58,7 @@ int is_registered(int my_pid)
  * Write to the proc file signalling that we have finished processing for this period.
  */
 void yield(int my_pid){
-    printf("%d: yielding...\n");
+    printf("%d: yielding...\n", my_pid);
     char string[100];
     sprintf(string, "echo \'Y:%d\' > /proc/mp2/status", my_pid);
     system(string);
