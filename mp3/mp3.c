@@ -2,6 +2,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/types.h>
 #include <linux/proc_fs.h>
 #include <linux/timer.h>
 #include <linux/list.h>
@@ -10,8 +11,6 @@
 
 #include <linux/sched.h>
 #include <linux/kthread.h>
-
-#include "defs.h"
 
 #define PROC_DIR_NAME "mp3"
 #define PROCFS_NAME "status"
@@ -34,11 +33,11 @@ struct task_struct * thread;
 struct proc_dir_entry* mp3_proc_dir_g;
 static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
-static ULONG procfs_buffer_size_g = 0; //size of buffer
+static ulong procfs_buffer_size_g = 0; //size of buffer
 
 typedef struct process_data{
     int process_id;
-    ULONG cpu_time;
+    ulong cpu_time;
     struct list_head list_node;
 } process_data_t;
 
@@ -51,7 +50,7 @@ DEFINE_MUTEX(process_list_mutex_g);
 //void mp3_add_pid_to_list(int pid);
 //void mp3_update_process_times(void);
 //void mp3_update_process_times_unsafe(void);
-//UINT mp3_get_process_times(char ** process_times);
+//uint mp3_get_process_times(char ** process_times);
 int thread_function(void * data);
 void start_kthread(void);
 void stop_kthread(void);
@@ -119,7 +118,7 @@ mp3_update_process_times_unsafe(){
     process_data_t * pid_data = NULL;
     list_for_each_entry(pid_data, &process_list_g, list_node)
     {
-        ULONG cpu_time;
+        ulong cpu_time;
         if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
         {
             pid_data->cpu_time = cpu_time;
@@ -139,9 +138,9 @@ mp3_update_process_times_unsafe(){
  * Be sure to kfree this string when you are done with it!
  */
 /*
-UINT
+uint
 mp3_get_process_times(char ** process_times){
-    UINT index = 0;
+    uint index = 0;
     process_data_t * pid_data;
 
     mutex_lock(&process_list_mutex_g);
@@ -159,7 +158,7 @@ mp3_get_process_times(char ** process_times){
 */
 
 void
-timer_handler(ULONG data)
+timer_handler(ulong data)
 {
     printk(KERN_INFO "TIMER RUN!!!" );
 
@@ -213,7 +212,7 @@ int
 procfile_write(
     struct file *file,
     const char *buffer,
-    ULONG count,
+    ulong count,
     void *data
     )
 {
@@ -222,10 +221,11 @@ procfile_write(
 
     char* action;
     char* pid_str;
-    ULONG pid;
+    ulong pid;
     int ret;
-    ULONG period;
-    ULONG computation;
+    ulong period;
+    ulong computation;
+    
 
     //
     // Gather input that has been written
@@ -241,6 +241,7 @@ procfile_write(
         printk(KERN_ALERT "Error in copy_from_user!\n");
         return -EFAULT;
     }
+    
 
     procfs_buffer_ptr = procfs_buffer;
 
