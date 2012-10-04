@@ -103,17 +103,25 @@ mp2_update_tasks(void)
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(curr_process, &process_list_g, list_node)
     {
-        // Find the task with state == READY and shortest period
-        if(next_process == NULL || (curr_process->state == READY && next_process->period > curr_process->period))
+        if(curr_process != NULL)
         {
-            next_process = curr_process;
-        }
-        if(running_process_g->state == RUNNING)
-        {
-            running_process_g->state = READY;
+            // Find the task with state == READY and shortest period
+            if(next_process == NULL || (curr_process->state == READY && next_process->period > curr_process->period))
+            {
+                next_process = curr_process;
+            }
+            if(running_process_g->state == RUNNING)
+            {
+                running_process_g->state = READY;
+            }
         }
     }
 
+    if(next_process == NULL)
+    {
+        mutex_unlock(&process_list_mutex_g);
+        return;
+    }
     next_process->state = RUNNING;
 
     if(running_process_g->PID != next_process->PID)
@@ -217,15 +225,15 @@ mp2_yield(ULONG pid)
     printk(KERN_INFO "pid %ld is yielding \n", pid);
 
     task_struct_t * task_data;
-    task_struct_t * temp_task_data;
 
     mutex_lock(&process_list_mutex_g);
 
-    list_for_each_entry_safe(task_data, temp_task_data, &process_list_g, list_node)
+    list_for_each_entry(task_data, &process_list_g, list_node)
     {
         if(task_data->PID == pid)
         {
             set_task_state(task_data->linux_task, TASK_UNINTERRUPTIBLE);
+            task_data->state = SLEEPING;
         }
     }
     mutex_unlock(&process_list_mutex_g);
@@ -260,7 +268,7 @@ mp2_deregister(ULONG pid)
 }
 
 bool
-mp2_admission_control(ULONG proc_time, ULONG period)
+mp2_admission_control(ULONG period, ULONG proc_time)
 {
     double utilization = 0;
 
@@ -442,6 +450,8 @@ my_module_init(void)
     proc_file_g->gid = 0;
     proc_file_g->size = 37;
 
+    start_kthread();
+
     printk(KERN_INFO "/proc/%s created\n", FULL_PROC);
 
     return 0;
@@ -452,6 +462,10 @@ my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp2_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
+
+    stop_kthread();
+    wake_up_process(thread_g);
+
     mp2_destroy_process_list();
 
     printk(KERN_INFO "MODULE UNLOADED\n");
