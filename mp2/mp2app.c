@@ -1,16 +1,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+
+/**
+ * Constants for the user space app to randomly choose periods and computation times.
+ */
 #define MIN_PERIOD 100
 #define MAX_PERIOD 500
 #define MIN_COMP_TIME 10
 #define MAX_COMP_TIME_TO_PERIOD_RATIO .2
+
+/**
+ * Range for the number of periods the process computes factorials
+ */
 #define MIN_ITERATIONS 100
 #define MAX_ITERATIONS 3000
 
 long int factorial(unsigned long int num);
 
-//TODO Write comments for functions
+/**
+ * Writes to the proc file to register the process with the rate-monotonic scheduler.
+ */
 void register_process(int my_pid, unsigned int period, unsigned int computation_time)
 {
     printf("%d: registering...\n", my_pid);
@@ -20,7 +30,9 @@ void register_process(int my_pid, unsigned int period, unsigned int computation_
     system(string);
 }
 
-//TODO Write comments
+/**
+ * Returns 1 if the proc file shows this program successfully registered.  0 otherwise.
+ */
 int is_registered(int my_pid)
 {
     int is_registered = 0;
@@ -42,15 +54,19 @@ int is_registered(int my_pid)
     return is_registered;
 }
 
-//TODO Write comments
-void yield(int my_pid, unsigned int period, unsigned int computation){
-    printf("%d: yielding for: %u\n", my_pid, period - computation);
+/**
+ * Write to the proc file signalling that we have finished processing for this period.
+ */
+void yield(int my_pid){
+    printf("%d: yielding...\n");
     char string[100];
     sprintf(string, "echo \'Y:%d\' > /proc/mp2/status", my_pid);
     system(string);
 }
 
-//TODO Write comments
+/**
+ * Writes to the proc file signalling that we are done with all processing.
+ */
 void unregister(int my_pid){
     printf("%d: unregistering...\n", my_pid);
     char string[100];
@@ -58,6 +74,10 @@ void unregister(int my_pid){
     system(string);
 }
 
+
+/**
+ * Returns a random value between the min and max parameters
+ */
 unsigned int rand_in_range(unsigned int min, unsigned int max)
 {
     unsigned int range = max - min + 1;
@@ -65,13 +85,18 @@ unsigned int rand_in_range(unsigned int min, unsigned int max)
     return random_value + min;
 }
 
-//TODO add comments
+
+/**
+ * Returns a number between MIN_PERIOD and MAX_PERIOD
+ */
 unsigned int get_period()
 {
     return rand_in_range(MIN_PERIOD, MAX_PERIOD);
 }
 
-//TODO add comments
+/**
+ * Returns a number between MIN_COMP_TIME and a fraction of period time
+ */
 unsigned int get_comp_time(int period)
 {
     unsigned int max_comp_time = (unsigned int)(period * MAX_COMP_TIME_TO_PERIOD_RATIO);
@@ -83,11 +108,18 @@ unsigned int get_comp_time(int period)
     return rand_in_range(MIN_COMP_TIME, max_comp_time);
 }
 
+/**
+ * Returns a random number between MIN_ITERATIONS and MAX_ITERATIONS
+ */
 unsigned int get_iterations()
 {
     return rand_in_range(MIN_ITERATIONS, MAX_ITERATIONS);
 }
 
+
+/**
+ * The main function.
+ */
 int main()
 {
     /* Seeding random number generator */
@@ -107,7 +139,7 @@ int main()
     printf("%d: Registered! \n", my_pid);
 
     unsigned int iterations = get_iterations();
-    yield(my_pid, period, computation_time);
+    yield(my_pid);
 
     while(iterations > 0)
     {
@@ -127,7 +159,7 @@ int main()
             time_elapsed = time.tv_usec - start_time;
         }
 
-        yield(my_pid, period, computation_time);
+        yield(my_pid);
         iterations--;
     }
 
@@ -136,7 +168,9 @@ int main()
 }
 
 
-//TODO Write comments
+/**
+ * Calculate the factorial of a number.
+ */
 long int factorial(unsigned long int num)
 {
     if(num == 1)
