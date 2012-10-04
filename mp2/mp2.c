@@ -96,10 +96,9 @@ mp2_destroy_process_list(){
 void
 mp2_update_tasks(void)
 {
-    printk(KERN_INFO "Updating tasks\n");
     task_struct_t * curr_process = NULL;
     task_struct_t * next_process = NULL;
-    task_struct_t * process_to_remove = NULL;
+    printk(KERN_INFO "Updating tasks\n");
 
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(curr_process, &process_list_g, list_node)
@@ -131,15 +130,16 @@ mp2_update_tasks(void)
 
     if(running_process_g != NULL && running_process_g->PID != next_process->PID)
     {
-        printk(KERN_INFO "Preempting the current process\n");
         // Preempt the currently running task
         struct sched_param sparam_remove;
+        struct sched_param sparam_schedule;
+        printk(KERN_INFO "Preempting the current process\n");
+
         sparam_remove.sched_priority = 0;
         sched_setscheduler(running_process_g->linux_task, SCHED_NORMAL, &sparam_remove);
 
         printk(KERN_INFO "Setting the next task to running and scheduling it\n");
         // Set state of new task to running and schedule it
-        struct sched_param sparam_schedule;
         wake_up_process(next_process->linux_task);
         sparam_schedule.sched_priority=MAX_USER_RT_PRIO-1;
         sched_setscheduler(next_process->linux_task, SCHED_FIFO, &sparam_schedule);
@@ -167,7 +167,7 @@ mp2_get_process_times(char ** process_times){
     index += sprintf(*process_times+index, "PID:Period:Computation:State\n");
     list_for_each_entry(task_data, &process_list_g, list_node)
     {
-        index += sprintf(*process_times+index, "%ld:%ld:%ld:%ld\n",
+        index += sprintf(*process_times+index, "%ld:%ld:%ld:%d\n",
                 task_data->PID, task_data->period, task_data->proc_time, task_data->state);
     }
     mutex_unlock(&process_list_mutex_g);
@@ -178,7 +178,7 @@ mp2_get_process_times(char ** process_times){
 void
 timer_handler(task_struct_t* pid)
 {
-    printk(KERN_INFO "Timer run for pid: %ld", pid);
+    printk(KERN_INFO "Timer run for pid: %ld", pid->PID);
 
     // Set the pid state to ready and call dispatch thread
     mp2_set_timer(pid);
@@ -191,8 +191,8 @@ int
 mp2_register(ULONG pid, ULONG period, ULONG proc_time)
 {
     //TODO test this, check for errors and return error codes
-    printk(KERN_INFO "Registering PID %ld, period: %ld, comp: %ld\n", pid, period, proc_time);
     task_struct_t * new_task_data;
+    printk(KERN_INFO "Registering PID %ld, period: %ld, comp: %ld\n", pid, period, proc_time);
 
     if(!mp2_admission_control(period, proc_time))
     {
@@ -231,9 +231,9 @@ mp2_set_timer(task_struct_t * process)
 int
 mp2_yield(ULONG pid)
 {
-    printk(KERN_INFO "pid %ld is yielding \n", pid);
 
     task_struct_t * task_data;
+    printk(KERN_INFO "pid %ld is yielding \n", pid);
 
     mutex_lock(&process_list_mutex_g);
 
@@ -253,10 +253,9 @@ mp2_yield(ULONG pid)
 int
 mp2_deregister(ULONG pid)
 {
-    printk(KERN_INFO "deregistering pid %ld", pid);
-
     task_struct_t * task_data;
     task_struct_t * temp_task_data;
+    printk(KERN_INFO "deregistering pid %ld", pid);
 
     mutex_lock(&process_list_mutex_g);
 
@@ -324,6 +323,7 @@ procfile_read(
         )
 {
     int ret;
+    int nbytes;
     char * proc_buff = NULL;
 
 
@@ -335,7 +335,7 @@ procfile_read(
 
         mp2_get_process_times(&proc_buff); // TODO: may want to check return?
         //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
-        int nbytes = sprintf(buffer, "%s", proc_buff);
+        nbytes = sprintf(buffer, "%s", proc_buff);
         printk(KERN_INFO "trying to print:%s", proc_buff);
 
         if(nbytes != 0)
@@ -358,8 +358,18 @@ procfile_write(
         void *data
         )
 {
-    int pid_from_proc_file;
     const char split[] = ":";
+    char* procfs_buffer_ptr;
+
+    char* register_action;
+    char* pid_str;
+    char* period_str;
+    char* computation_str;
+    ULONG pid;
+    int ret;
+    ULONG period;
+    ULONG computation;
+
 
     debugk(KERN_INFO "/proc/%s was written to!\n", FULL_PROC);
     /* get buffer size */
@@ -373,12 +383,12 @@ procfile_write(
         return -EFAULT;
     }
 
-    char* procfs_buffer_ptr = procfs_buffer;
+    procfs_buffer_ptr = procfs_buffer;
 
-    char* register_action = strsep(&procfs_buffer_ptr, split);
-    char* pid_str = strsep(&procfs_buffer_ptr, split);
-    char* period_str = strsep(&procfs_buffer_ptr, split);
-    char* computation_str = strsep(&procfs_buffer_ptr, split);
+    register_action = strsep(&procfs_buffer_ptr, split);
+    pid_str = strsep(&procfs_buffer_ptr, split);
+    period_str = strsep(&procfs_buffer_ptr, split);
+    computation_str = strsep(&procfs_buffer_ptr, split);
 
 
 
@@ -388,7 +398,7 @@ procfile_write(
         return -EINVAL;
     }
 
-    ULONG pid = simple_strtol(pid_str, NULL, 10);
+    pid = simple_strtol(pid_str, NULL, 10);
 
     if(!pid)
     {
@@ -396,11 +406,11 @@ procfile_write(
         return -EINVAL;
     }
 
-    int ret = 0;
+    ret = 0;
     if( register_action[0] == 'R' )
     {
-        ULONG period = simple_strtol(period_str, NULL, 10);
-        ULONG computation = simple_strtol(computation_str, NULL, 10);
+        period = simple_strtol(period_str, NULL, 10);
+        computation = simple_strtol(computation_str, NULL, 10);
         ret = mp2_register(pid, period, computation);
     }
     else if ( register_action[0] == 'Y' )
