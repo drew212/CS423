@@ -197,9 +197,15 @@ timer_handler(task_struct_t* pid)
 
     // Set the pid state to ready and call dispatch thread
     mp2_set_timer(pid);
-    set_pid_ready(pid);
+    if(running_process_g != pid)
+    {
+        printk(KERN_INFO "Running process is running across it's period\n");
+        set_pid_ready(pid);
 
-    wake_up_process(thread_g);
+        wake_up_process(thread_g);
+    }
+
+
 }
 
 int
@@ -262,6 +268,7 @@ mp2_yield(ULONG pid)
             //sched_setscheduler(task_data->linux_task, SCHED_NORMAL, &sparam_remove);
         }
     }
+    running_process_g = NULL;
     mutex_unlock(&process_list_mutex_g);
     wake_up_process(thread_g);
     return 0;
