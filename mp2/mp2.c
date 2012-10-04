@@ -315,7 +315,7 @@ mp2_admission_control(ULONG period, ULONG proc_time)
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(task_data, &process_list_g, list_node)
     {
-        utilization += task_data->proc_time / task_data->period;
+        utilization += (double)task_data->proc_time / task_data->period;
     }
     utilization += proc_time / period;
     mutex_unlock(&process_list_mutex_g);

@@ -33,6 +33,7 @@ int is_registered(int my_pid)
         int pid = atoi(line);
         if(pid == my_pid) 
         {
+            printf("Registered PID: %d\n", pid);
             is_registered = 1;
             break;
         }
@@ -43,7 +44,7 @@ int is_registered(int my_pid)
 
 //TODO Write comments
 void yield(int my_pid, unsigned int period, unsigned int computation){
-    printf("%d: yielding for: %ld\n", my_pid, period - computation);
+    printf("%d: yielding for: %u\n", my_pid, period - computation);
     char string[100];
     sprintf(string, "echo \'Y:%d\' > /proc/mp2/status", my_pid);
     system(string);
