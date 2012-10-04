@@ -11,6 +11,8 @@
 #include <linux/sched.h>
 #include <linux/kthread.h>
 
+#include "defs.h"
+
 #define PROC_DIR_NAME "mp3"
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
@@ -32,11 +34,11 @@ struct task_struct * thread;
 struct proc_dir_entry* mp3_proc_dir_g;
 static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
-static unsigned long procfs_buffer_size = 0; //size of buffer
+static ULONG procfs_buffer_size_g = 0; //size of buffer
 
 typedef struct process_data{
     int process_id;
-    unsigned long cpu_time;
+    ULONG cpu_time;
     struct list_head list_node;
 } process_data_t;
 
@@ -49,7 +51,7 @@ DEFINE_MUTEX(process_list_mutex_g);
 //void mp3_add_pid_to_list(int pid);
 //void mp3_update_process_times(void);
 //void mp3_update_process_times_unsafe(void);
-//unsigned int mp3_get_process_times(char ** process_times);
+//UINT mp3_get_process_times(char ** process_times);
 int thread_function(void * data);
 void start_kthread(void);
 void stop_kthread(void);
@@ -117,7 +119,7 @@ mp3_update_process_times_unsafe(){
     process_data_t * pid_data = NULL;
     list_for_each_entry(pid_data, &process_list_g, list_node)
     {
-        unsigned long cpu_time;
+        ULONG cpu_time;
         if(0 == get_cpu_use(pid_data->process_id, &cpu_time))
         {
             pid_data->cpu_time = cpu_time;
@@ -137,9 +139,9 @@ mp3_update_process_times_unsafe(){
  * Be sure to kfree this string when you are done with it!
  */
 /*
-unsigned int
+UINT
 mp3_get_process_times(char ** process_times){
-    unsigned int index = 0;
+    UINT index = 0;
     process_data_t * pid_data;
 
     mutex_lock(&process_list_mutex_g);
@@ -157,7 +159,7 @@ mp3_get_process_times(char ** process_times){
 */
 
 void
-timer_handler(unsigned long data)
+timer_handler(ULONG data)
 {
     printk(KERN_INFO "TIMER RUN!!!" );
 
@@ -211,31 +213,82 @@ int
 procfile_write(
     struct file *file,
     const char *buffer,
-    unsigned long count,
+    ULONG count,
     void *data
     )
 {
-    int pid_from_proc_file;
+    const char split[] = " ";
+    char* procfs_buffer_ptr;
+
+    char* action;
+    char* pid_str;
+    ULONG pid;
+    int ret;
+    ULONG period;
+    ULONG computation;
+
+    //
+    // Gather input that has been written
+    //
     debugk(KERN_INFO "/proc/%s was written to!\n", FULL_PROC);
-    /* get buffer size */
-    procfs_buffer_size = count;
-    if (procfs_buffer_size > PROCFS_MAX_SIZE ) {
-        procfs_buffer_size = PROCFS_MAX_SIZE;
+
+    procfs_buffer_size_g = count;
+    if (procfs_buffer_size_g > PROCFS_MAX_SIZE ) {
+        procfs_buffer_size_g = PROCFS_MAX_SIZE;
     }
 
-    /* write data to the buffer */
-    if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size) ) {
+    if ( copy_from_user(procfs_buffer, buffer, procfs_buffer_size_g) ) {
+        printk(KERN_ALERT "Error in copy_from_user!\n");
         return -EFAULT;
     }
 
-    pid_from_proc_file = simple_strtol(procfs_buffer, NULL, 10);
+    procfs_buffer_ptr = procfs_buffer;
 
-    debugk(KERN_INFO "PID from process is: %d\n", pid_from_proc_file);
+    action = strsep(&procfs_buffer_ptr, split);
+    if(action[0] == '\0')
+    {
+        printk(KERN_ALERT "Malformed procfs write, not registering/yielding/de-regsitering\n");
+        return -EINVAL;
+    }
+
+    pid_str = strsep(&procfs_buffer_ptr, split);
+
+    //
+    // Validate input from procfile write
+    //
+    if(pid_str[0] == '\0' )
+    {
+        printk(KERN_ALERT "Malformed procfs write, not registering/yielding/de-regsitering\n");
+        return -EINVAL;
+    }
+
+    if(action[0] == 'R')
+    {
+        //TODO: Register
+    }
+    else if(action[0] == 'U')
+    {
+        //TODO: Deregister
+        //TODO: If PID not in list, return error
+    }
+    else
+    {
+        printk(KERN_ALERT "Malformed procfs write, not registering/yielding/de-regsitering\n");
+        return -EINVAL;
+    }
+
+    pid = simple_strtol(pid_str, NULL, 10);
+
+    if(!pid)
+    {
+        printk(KERN_ALERT "Malformed PID\n");
+        return -EINVAL;
+    }
 
     //mp3_add_pid_to_list(pid_from_proc_file);
     debugk(KERN_INFO "PID:%s, registered.\n", procfs_buffer);
 
-    return procfs_buffer_size;
+    return procfs_buffer_size_g;
 }
 
 
@@ -243,7 +296,6 @@ int __init
 my_module_init(void)
 {
     printk(KERN_INFO "MODULE LOADED\n");
-    debugk(KERN_INFO "debugging works!\n");
 
     //Setup /proc/mp3/status
     mp3_proc_dir_g = proc_mkdir(PROC_DIR_NAME, NULL);
