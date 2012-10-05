@@ -14,13 +14,19 @@
 
 #include <linux/sched.h>
 #include <linux/kthread.h>
+#include <linux/fs.h>
 
 #include "mp3_given.h"
 
+#define SUCCESS 0
 #define PROC_DIR_NAME "mp3"
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
 #define FULL_PROC "status/mp3"
+
+// Character Device
+#define DEVICE_NAME "mp3_chardrv"
+#define MAJOR_NUM 212
 
 #define SHARED_BUFFER_SIZE (128 * 4096)
 
@@ -71,6 +77,12 @@ void mp3_write_task_stats_to_shared_buffer(void);
 void mp3_schedule_delayed_work_queue_job(void);
 void mp3_clear_work_queue(void);
 void mp3_work_queue_function(struct work_struct * work);
+
+// Device driver prototypes
+int device_open(struct inode* inode, struct file* file){return SUCCESS;}
+int device_close(struct inode* inode, struct file* file){return SUCCESS;}
+int device_mmap(struct file* file, struct vm_area_struct* vm_area);
+
 
 /**
  * Delete linked list. Call after removing procfs entries
@@ -174,7 +186,31 @@ mp3_work_queue_function(struct work_struct * work)
     mp3_schedule_delayed_work_queue_job();
 }
 
+uint
+mp3_get_pids(char** pids_string)
+{
+    uint index = 0;
+    task_struct_t * task_data;
 
+    mutex_lock(&process_list_mutex_g);
+
+    *pids_string = (char *)kmalloc(MAX_INPUT * sizeof(char), GFP_KERNEL);
+    *pids_string[0] = '\0';
+
+    list_for_each_entry(task_data, &process_list_g, list_node)
+    {
+        index += sprintf(*pids_string+index, "%d\n", task_data->PID);
+    }
+    mutex_unlock(&process_list_mutex_g);
+    return index;
+}
+
+int device_mmap(struct file* file, struct vm_area_struct* vm_area)
+{
+    //TODO
+    printk(KERN_INFO "mmap called!\n");
+    return SUCCESS;
+}
 
 void
 timer_handler(ulong data)
@@ -209,11 +245,11 @@ procfile_read(
         /* we have finished to read, return 0 */
         ret  = 0;
     } else {
+
         /* fill the buffer, return the buffer size */
-        //int num_copied = mp3_get_process_times(&proc_buff);
-        //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
-        int nbytes = sprintf(buffer, "%s", proc_buff);
-        //debugk(KERN_INFO "num_coppied: %d", num_copied);
+        int num_copied = mp3_get_pids(&proc_buff);
+        int nbytes = copy_to_user(buffer, proc_buff, num_copied);
+
         debugk(KERN_INFO "%snbytes: %d\n", proc_buff, nbytes);
 
         if(nbytes != 0)
@@ -221,7 +257,7 @@ procfile_read(
             printk(KERN_ALERT "procfile_read copy_to_user failed!\n");
         }
 
-        //kfree(proc_buff);
+        kfree(proc_buff);
         ret = nbytes;
     }
     return ret;
@@ -300,14 +336,18 @@ procfile_write(
         return -EINVAL;
     }
 
-
     return procfs_buffer_size_g;
 }
 
-int __init
+    int __init
 my_module_init(void)
 {
-    pgprot_t protect;
+    struct file_operations fops = {
+        .open = device_open,
+        .release = device_close,
+        .mmap = device_mmap
+    };
+    int major_num;
 
     printk(KERN_INFO "MODULE LOADED\n");
 
@@ -333,28 +373,40 @@ my_module_init(void)
 
     printk(KERN_INFO "/proc/%s created\n", FULL_PROC);
 
+    //
+    // Character Device Driver
+    //
+    major_num = register_chrdev(MAJOR_NUM, DEVICE_NAME, &fops);
+    if(major_num != MAJOR_NUM)
+    {
+        printk(KERN_ALERT "Registering chararacter device failed with %d!\n", major_num);
+        return major_num;
+    }
+    printk(KERN_INFO "Character device registered!\n");
+
     //SETUP TIMER
     setup_timer ( &timer_g, timer_handler, 0);
     mod_timer ( &timer_g, jiffies + msecs_to_jiffies (5000) );
 
-    protect.pgprot = PG_reserved;
-    shared_buffer_g = __vmalloc(SHARED_BUFFER_SIZE, GFP_KERNEL | __GFP_ZERO, protect);
+    shared_buffer_g = vzalloc(SHARED_BUFFER_SIZE);
 
 
     process_list_size_g = 0;
     mp3_workqueue_g = create_workqueue("mp3_workqueue");
 
-    return 0;
+    return SUCCESS;
 }
 
-void __exit
+    void __exit
 my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp3_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
-    mp3_destroy_process_list();
 
+    mp3_destroy_process_list();
     destroy_workqueue(mp3_workqueue_g);
+
+    unregister_chrdev(MAJOR_NUM, DEVICE_NAME);
 
     vfree(shared_buffer_g);
 
@@ -388,7 +440,7 @@ mp3_write_task_stats_to_shared_buffer(void)
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(stored_task_data, &process_list_g, list_node)
     {
-        /* TODO: Write stats to buffer for each task and remove debugk below.
+        /* TODO: Write stats to buffer for each task and remove the debugk line below.
          *
         stored_task_data->cpu_usage;
         stored_task_data->min;
