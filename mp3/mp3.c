@@ -10,6 +10,7 @@
 #include <asm/uaccess.h>
 #include <linux/vmalloc.h>
 #include <linux/page-flags.h>
+#include <linux/workqueue.h>
 
 #include <linux/sched.h>
 #include <linux/kthread.h>
@@ -41,6 +42,9 @@ static ulong procfs_buffer_size_g = 0; //size of buffer
 
 void* shared_buffer_g;
 
+static struct workqueue_struct * mp3_workqueue_g;
+struct delayed_work mp3_delayed_job_g;
+
 typedef struct mp3_task_struct{
     int PID;
     struct task_struct* linux_task;
@@ -51,14 +55,22 @@ typedef struct mp3_task_struct{
     struct list_head list_node;
 } task_struct_t;
 
+//Process List related globals
 LIST_HEAD(process_list_g);
+ulong process_list_size_g;
 DEFINE_MUTEX(process_list_mutex_g);
 
 //Function Prototypes
 void mp3_destroy_process_list(void);
-void mp3_add_pid_to_list(int pid);
+void mp3_add_task_to_list(int pid);
 void mp3_remove_pid_from_list(int pid);
-void update_task_data(int pid, task_struct_t* task);
+
+void mp3_update_task_data(void);
+void mp3_write_task_stats_to_shared_buffer(void);
+
+void mp3_schedule_delayed_work_queue_job(void);
+void mp3_clear_work_queue(void);
+void mp3_work_queue_function(struct work_struct * work);
 
 /**
  * Delete linked list. Call after removing procfs entries
@@ -68,6 +80,10 @@ mp3_destroy_process_list(){
     task_struct_t * pid_data = NULL;
     task_struct_t * temp_pid_data = NULL;
     mutex_lock(&process_list_mutex_g);
+
+    //We will no longer need the work queue so clear it before the task lists.
+    mp3_clear_work_queue();
+
     list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node) 
     {
         list_del(&pid_data->list_node);
@@ -83,18 +99,23 @@ mp3_destroy_process_list(){
 void
 mp3_add_task_to_list(int pid){
 
-    task_struct_t* new_pid_data;
+    task_struct_t* new_task_data;
 
     mutex_lock(&process_list_mutex_g);
 
-    new_pid_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
+    new_task_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
+    new_task_data->linux_task = find_task_by_pid(pid);
+    new_task_data->PID = pid;
 
-    new_pid_data->linux_task = find_task_by_pid(pid);
-    new_pid_data->PID = pid;
+    INIT_LIST_HEAD(&new_task_data->list_node);
+    list_add_tail(&new_task_data->list_node, &process_list_g);
 
-    INIT_LIST_HEAD(&new_pid_data->list_node);
-
-    list_add_tail(&new_pid_data->list_node, &process_list_g);
+    if(process_list_size_g == 0)
+    {
+        //First task in list so we also create a work queue job.
+        mp3_schedule_delayed_work_queue_job();
+    }
+    process_list_size_g++;
 
     mutex_unlock(&process_list_mutex_g);
 }
@@ -102,22 +123,58 @@ mp3_add_task_to_list(int pid){
 void
 mp3_remove_pid_from_list(int pid)
 {
-    task_struct_t * pid_data = NULL;
-    task_struct_t * temp_pid_data = NULL;
-
-    mutex_lock(&process_list_mutex_g);
-    list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node)
+    if(process_list_size_g > 0)
     {
-        if(pid_data->PID == pid)
+        task_struct_t * pid_data = NULL;
+        task_struct_t * temp_pid_data = NULL;
+
+        mutex_lock(&process_list_mutex_g);
+        list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node)
         {
-            list_del(&pid_data->list_node);
-            kfree(pid_data);
-            //TODO: Can we mutex unlock and return here so we don't go through the whole list?
+            if(pid_data->PID == pid)
+            {
+                list_del(&pid_data->list_node);
+                kfree(pid_data);
+            }
         }
+
+        process_list_size_g--;
+
+        if(process_list_size_g == 0){
+            //No more tasks, we need to clear work queue
+            mp3_clear_work_queue();
+        }
+
+        mutex_unlock(&process_list_mutex_g);
     }
-    mutex_unlock(&process_list_mutex_g);
 
 }
+
+/*##### WORK QUEUE MANAGEMENT #####*/
+
+void
+mp3_schedule_delayed_work_queue_job(void)
+{
+    //Schedule to run in 1/20th of a second
+    INIT_DELAYED_WORK(&mp3_delayed_job_g, mp3_work_queue_function);
+    queue_delayed_work(mp3_workqueue_g, &mp3_delayed_job_g, msecs_to_jiffies(50));
+}
+
+void
+mp3_clear_work_queue(void)
+{
+    cancel_delayed_work_sync(&mp3_delayed_job_g);
+}
+
+void
+mp3_work_queue_function(struct work_struct * work)
+{
+    mp3_update_task_data();
+    mp3_write_task_stats_to_shared_buffer();
+    mp3_schedule_delayed_work_queue_job();
+}
+
+
 
 void
 timer_handler(ulong data)
@@ -230,7 +287,7 @@ procfile_write(
 
     if(action[0] == 'R')
     {
-        mp3_add_pid_to_list(pid);
+        mp3_add_task_to_list(pid);
         debugk(KERN_INFO "PID:%s, registered.\n", procfs_buffer);
     }
     else if(action[0] == 'U')
@@ -283,6 +340,10 @@ my_module_init(void)
     protect.pgprot = PG_reserved;
     shared_buffer_g = __vmalloc(SHARED_BUFFER_SIZE, GFP_KERNEL | __GFP_ZERO, protect);
 
+
+    process_list_size_g = 0;
+    mp3_workqueue_g = create_workqueue("mp3_workqueue");
+
     return 0;
 }
 
@@ -293,6 +354,8 @@ my_module_exit(void)
     remove_proc_entry(PROC_DIR_NAME, NULL);
     mp3_destroy_process_list();
 
+    destroy_workqueue(mp3_workqueue_g);
+
     vfree(shared_buffer_g);
 
     del_timer ( &timer_g );
@@ -300,23 +363,39 @@ my_module_exit(void)
 }
 
 void
-update_task_data(int pid, task_struct_t* task)
+mp3_update_task_data(void)
 {
+    struct task_struct * task;
 
-    task_struct_t * pid_data = NULL;
+    task_struct_t * stored_task_data = NULL;
     mutex_lock(&process_list_mutex_g);
-    list_for_each_entry(pid_data, &process_list_g, list_node)
+    list_for_each_entry(stored_task_data, &process_list_g, list_node)
     {
-        if(pid_data->PID == pid)
-        {
-            struct task_struct * task = pid_data->linux_task;
+        task = stored_task_data->linux_task;
 
-            pid_data->cpu_usage = task->utime;
-            pid_data->min += task->min_flt;
-            pid_data->maj += task->maj_flt;
-            task->min_flt = task->maj_flt = 0;
-        }
+        stored_task_data->cpu_usage = task->utime;
+        stored_task_data->min += task->min_flt;
+        stored_task_data->maj += task->maj_flt;
+        task->min_flt = task->maj_flt = 0;
     }
+    mutex_unlock(&process_list_mutex_g);
+}
+
+void
+mp3_write_task_stats_to_shared_buffer(void)
+{
+    task_struct_t * stored_task_data = NULL;
+    mutex_lock(&process_list_mutex_g);
+    list_for_each_entry(stored_task_data, &process_list_g, list_node)
+    {
+        /* TODO: Write stats to buffer for each task and remove debugk below.
+         *
+        stored_task_data->cpu_usage;
+        stored_task_data->min;
+        stored_task_data->maj;
+        */
+    }
+    debugk(KERN_INFO "I would write the stats to the buffer if you implmented me...");
     mutex_unlock(&process_list_mutex_g);
 }
 
