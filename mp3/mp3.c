@@ -8,6 +8,8 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <asm/uaccess.h>
+#include <linux/vmalloc.h>
+#include <linux/page-flags.h>
 
 #include <linux/sched.h>
 #include <linux/kthread.h>
@@ -18,6 +20,8 @@
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
 #define FULL_PROC "status/mp3"
+
+#define SHARED_BUFFER_SIZE (128 * 4096)
 
 #define DEBUG
 
@@ -35,12 +39,17 @@ static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
 static ulong procfs_buffer_size_g = 0; //size of buffer
 
-typedef struct process_data{
+void* shared_buffer_g;
+
+typedef struct mp3_task_struct{
     int PID;
     struct task_struct* linux_task;
+    ulong cpu_usage;
+    ulong min;
+    ulong maj;
 
     struct list_head list_node;
-} process_data_t;
+} task_struct_t;
 
 LIST_HEAD(process_list_g);
 DEFINE_MUTEX(process_list_mutex_g);
@@ -49,14 +58,15 @@ DEFINE_MUTEX(process_list_mutex_g);
 void mp3_destroy_process_list(void);
 void mp3_add_pid_to_list(int pid);
 void mp3_remove_pid_from_list(int pid);
+void update_task_data(int pid, task_struct_t* task);
 
 /**
  * Delete linked list. Call after removing procfs entries
  */
 void
 mp3_destroy_process_list(){
-    process_data_t * pid_data = NULL;
-    process_data_t * temp_pid_data = NULL;
+    task_struct_t * pid_data = NULL;
+    task_struct_t * temp_pid_data = NULL;
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node) 
     {
@@ -72,11 +82,12 @@ mp3_destroy_process_list(){
  */
 void
 mp3_add_task_to_list(int pid){
-    task_struct_t * new_task;
+
+    task_struct_t* new_pid_data;
 
     mutex_lock(&process_list_mutex_g);
 
-    new_pid_data = (process_data_t *)kmalloc(sizeof(process_data_t), GFP_KERNEL);
+    new_pid_data = (task_struct_t *)kmalloc(sizeof(task_struct_t), GFP_KERNEL);
 
     new_pid_data->linux_task = find_task_by_pid(pid);
     new_pid_data->PID = pid;
@@ -91,8 +102,8 @@ mp3_add_task_to_list(int pid){
 void
 mp3_remove_pid_from_list(int pid)
 {
-    process_data_t * pid_data = NULL;
-    process_data_t * temp_pid_data = NULL;
+    task_struct_t * pid_data = NULL;
+    task_struct_t * temp_pid_data = NULL;
 
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry_safe(pid_data, temp_pid_data, &process_list_g, list_node)
@@ -153,7 +164,7 @@ procfile_read(
             printk(KERN_ALERT "procfile_read copy_to_user failed!\n");
         }
 
-        kfree(proc_buff);
+        //kfree(proc_buff);
         ret = nbytes;
     }
     return ret;
@@ -224,8 +235,7 @@ procfile_write(
     }
     else if(action[0] == 'U')
     {
-        //TODO: Deregister
-        //TODO: If PID not in list, return error
+        mp3_remove_pid_from_list(pid);
     }
     else
     {
@@ -240,6 +250,8 @@ procfile_write(
 int __init
 my_module_init(void)
 {
+    pgprot_t protect;
+
     printk(KERN_INFO "MODULE LOADED\n");
 
     //
@@ -268,6 +280,9 @@ my_module_init(void)
     setup_timer ( &timer_g, timer_handler, 0);
     mod_timer ( &timer_g, jiffies + msecs_to_jiffies (5000) );
 
+    protect.pgprot = PG_reserved;
+    shared_buffer_g = __vmalloc(SHARED_BUFFER_SIZE, GFP_KERNEL | __GFP_ZERO, protect);
+
     return 0;
 }
 
@@ -278,8 +293,31 @@ my_module_exit(void)
     remove_proc_entry(PROC_DIR_NAME, NULL);
     mp3_destroy_process_list();
 
+    vfree(shared_buffer_g);
+
     del_timer ( &timer_g );
     printk(KERN_INFO "MODULE UNLOADED\n");
+}
+
+void
+update_task_data(int pid, task_struct_t* task)
+{
+
+    task_struct_t * pid_data = NULL;
+    mutex_lock(&process_list_mutex_g);
+    list_for_each_entry(pid_data, &process_list_g, list_node)
+    {
+        if(pid_data->PID == pid)
+        {
+            struct task_struct * task = pid_data->linux_task;
+
+            pid_data->cpu_usage = task->utime;
+            pid_data->min += task->min_flt;
+            pid_data->maj += task->maj_flt;
+            task->min_flt = task->maj_flt = 0;
+        }
+    }
+    mutex_unlock(&process_list_mutex_g);
 }
 
 module_init(my_module_init);

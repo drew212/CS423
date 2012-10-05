@@ -20,3 +20,5 @@ Module.symvers
 mp*app
 
 test
+work
+monitor
