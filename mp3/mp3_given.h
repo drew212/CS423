@@ -1,9 +1,21 @@
-#ifndef __MP1_GIVEN_INCLUDE__
-#define __MP1_GIVEN_INCLUDE__
+#ifndef __MP3_GIVEN_H__
+#define __MP3_GIVEN_H__
 
 #include <linux/pid.h>
+#include <linux/sched.h>
 
 #define find_task_by_pid(nr) pid_task(find_vpid(nr), PIDTYPE_PID)
+
+struct task_struct* find_task_by_pid(unsigned int nr)
+{
+    struct task_struct* task;
+    rcu_read_lock();
+    task=pid_task(find_vpid(nr), PIDTYPE_PID);
+    rcu_read_unlock();
+
+    return task;
+}
+
 
 //THIS FUNCTION RETURNS 0 IF THE PID IS VALID AND THE CPU TIME AND MAJOR AND MINOR PAGE FAULT COUNTS ARE SUCCESFULLY RETURNED BY THE PARAMETER CPU_USE. OTHERWISE IT RETURNS -1
 int get_cpu_use(int pid, unsigned long *min, unsigned long *maj, unsigned long *cpu_use)
