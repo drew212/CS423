@@ -119,7 +119,26 @@ mp3_remove_pid_from_list(int pid)
 
 }
 
-void
+uint
+mp3_get_pids(char** pids_string)
+{
+    uint index = 0;
+    task_struct_t * task_data;
+
+    mutex_lock(&process_list_mutex_g);
+
+    *pids_string = (char *)kmalloc(MAX_INPUT * sizeof(char), GFP_KERNEL);
+    *pids_string[0] = '\0';
+
+    list_for_each_entry(task_data, &process_list_g, list_node)
+    {
+        index += sprintf(*pids_string+index, "%d\n", task_data->PID);
+    }
+    mutex_unlock(&process_list_mutex_g);
+    return index;
+}
+
+    void
 timer_handler(ulong data)
 {
     printk(KERN_INFO "TIMER RUN!!!" );
@@ -152,11 +171,11 @@ procfile_read(
         /* we have finished to read, return 0 */
         ret  = 0;
     } else {
+
         /* fill the buffer, return the buffer size */
-        //int num_copied = mp3_get_process_times(&proc_buff);
-        //int nbytes = copy_to_user(buffer, proc_buff, num_copied);
-        int nbytes = sprintf(buffer, "%s", proc_buff);
-        //debugk(KERN_INFO "num_coppied: %d", num_copied);
+        int num_copied = mp3_get_pids(&proc_buff);
+        int nbytes = copy_to_user(buffer, proc_buff, num_copied);
+
         debugk(KERN_INFO "%snbytes: %d\n", proc_buff, nbytes);
 
         if(nbytes != 0)
@@ -164,7 +183,7 @@ procfile_read(
             printk(KERN_ALERT "procfile_read copy_to_user failed!\n");
         }
 
-        //kfree(proc_buff);
+        kfree(proc_buff);
         ret = nbytes;
     }
     return ret;
@@ -247,7 +266,7 @@ procfile_write(
     return procfs_buffer_size_g;
 }
 
-int __init
+    int __init
 my_module_init(void)
 {
     pgprot_t protect;
@@ -286,7 +305,7 @@ my_module_init(void)
     return 0;
 }
 
-void __exit
+    void __exit
 my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp3_proc_dir_g);
@@ -299,10 +318,9 @@ my_module_exit(void)
     printk(KERN_INFO "MODULE UNLOADED\n");
 }
 
-void
+    void
 update_task_data(int pid, task_struct_t* task)
 {
-
     task_struct_t * pid_data = NULL;
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(pid_data, &process_list_g, list_node)
