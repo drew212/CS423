@@ -10,16 +10,21 @@
 #include <asm/uaccess.h>
 #include <linux/vmalloc.h>
 #include <linux/page-flags.h>
-
 #include <linux/sched.h>
 #include <linux/kthread.h>
+#include <linux/fs.h>
 
 #include "mp3_given.h"
 
+#define SUCCESS 0
 #define PROC_DIR_NAME "mp3"
 #define PROCFS_NAME "status"
 #define PROCFS_MAX_SIZE 1024
 #define FULL_PROC "status/mp3"
+
+// Character Device
+#define DEVICE_NAME "mp3_chardrv"
+#define MAJOR_NUM 212
 
 #define SHARED_BUFFER_SIZE (128 * 4096)
 
@@ -59,6 +64,12 @@ void mp3_destroy_process_list(void);
 void mp3_add_pid_to_list(int pid);
 void mp3_remove_pid_from_list(int pid);
 void update_task_data(int pid, task_struct_t* task);
+
+// Device driver prototypes
+int device_open(struct inode* inode, struct file* file){return SUCCESS;}
+int device_close(struct inode* inode, struct file* file){return SUCCESS;}
+int device_mmap(struct file* file, struct vm_area_struct* vm_area);
+
 
 /**
  * Delete linked list. Call after removing procfs entries
@@ -136,6 +147,13 @@ mp3_get_pids(char** pids_string)
     }
     mutex_unlock(&process_list_mutex_g);
     return index;
+}
+
+int device_mmap(struct file* file, struct vm_area_struct* vm_area)
+{
+    //TODO
+    printk(KERN_INFO "mmap called!\n");
+    return SUCCESS;
 }
 
     void
@@ -262,14 +280,17 @@ procfile_write(
         return -EINVAL;
     }
 
-
     return procfs_buffer_size_g;
 }
 
     int __init
 my_module_init(void)
 {
-    pgprot_t protect;
+    struct file_operations fops = {
+        .open = device_open,
+        .release = device_close,
+        .mmap = device_mmap
+    };
 
     printk(KERN_INFO "MODULE LOADED\n");
 
@@ -295,14 +316,24 @@ my_module_init(void)
 
     printk(KERN_INFO "/proc/%s created\n", FULL_PROC);
 
+    //
+    // Character Device Driver
+    //
+    int major_num = register_chrdev(MAJOR_NUM, DEVICE_NAME, &fops);
+    if(major_num != MAJOR_NUM)
+    {
+        printk(KERN_ALERT "Registering chararacter device failed with %d!\n", major_num);
+        return major_num;
+    }
+    printk(KERN_INFO "Character device registered!\n");
+
     //SETUP TIMER
     setup_timer ( &timer_g, timer_handler, 0);
     mod_timer ( &timer_g, jiffies + msecs_to_jiffies (5000) );
 
-    protect.pgprot = PG_reserved;
-    shared_buffer_g = __vmalloc(SHARED_BUFFER_SIZE, GFP_KERNEL | __GFP_ZERO, protect);
+    shared_buffer_g = vzalloc(SHARED_BUFFER_SIZE);
 
-    return 0;
+    return SUCCESS;
 }
 
     void __exit
@@ -311,6 +342,8 @@ my_module_exit(void)
     remove_proc_entry(PROCFS_NAME, mp3_proc_dir_g);
     remove_proc_entry(PROC_DIR_NAME, NULL);
     mp3_destroy_process_list();
+
+    unregister_chrdev(MAJOR_NUM, DEVICE_NAME);
 
     vfree(shared_buffer_g);
 
