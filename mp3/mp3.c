@@ -47,6 +47,8 @@ static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 static ulong procfs_buffer_size_g = 0; //size of buffer
 
 void* shared_buffer_g;
+ulong shared_buffer_offset_g;
+
 
 static struct workqueue_struct * mp3_workqueue_g;
 struct delayed_work mp3_delayed_job_g;
@@ -389,6 +391,7 @@ my_module_init(void)
     mod_timer ( &timer_g, jiffies + msecs_to_jiffies (5000) );
 
     shared_buffer_g = vzalloc(SHARED_BUFFER_SIZE);
+    shared_buffer_offset_g = 0;
 
 
     process_list_size_g = 0;
@@ -437,16 +440,46 @@ void
 mp3_write_task_stats_to_shared_buffer(void)
 {
     task_struct_t * stored_task_data = NULL;
+    ulong * shared_stats_buffer;
+
+    ulong total_cpu_usage;
+    ulong total_min_faults;
+    ulong total_maj_faults;
+
+    shared_stats_buffer = (ulong *)shared_buffer_g;
+
+    total_cpu_usage = 0;
+    total_min_faults = 0;
+    total_maj_faults = 0;
+
     mutex_lock(&process_list_mutex_g);
     list_for_each_entry(stored_task_data, &process_list_g, list_node)
     {
-        /* TODO: Write stats to buffer for each task and remove the debugk line below.
-         *
-        stored_task_data->cpu_usage;
-        stored_task_data->min;
-        stored_task_data->maj;
-        */
+        total_cpu_usage += stored_task_data->cpu_usage;
+        total_min_faults += stored_task_data->min;
+        total_maj_faults += stored_task_data->maj;
     }
+    shared_stats_buffer[shared_buffer_offset_g++] = jiffies;
+    if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
+    {
+        shared_buffer_offset_g = 0;
+    }
+    shared_stats_buffer[shared_buffer_offset_g++] = total_min_faults;
+    if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
+    {
+        shared_buffer_offset_g = 0;
+    }
+    shared_stats_buffer[shared_buffer_offset_g++] = total_maj_faults;
+    if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
+    {
+        shared_buffer_offset_g = 0;
+    }
+    shared_stats_buffer[shared_buffer_offset_g++] = total_cpu_usage;
+    if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
+    {
+        shared_buffer_offset_g = 0;
+    }
+
     debugk(KERN_INFO "I would write the stats to the buffer if you implmented me...");
     mutex_unlock(&process_list_mutex_g);
 }
