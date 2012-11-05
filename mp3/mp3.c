@@ -9,6 +9,7 @@
 #include <linux/mutex.h>
 #include <asm/uaccess.h>
 #include <linux/vmalloc.h>
+#include <linux/mm.h>
 #include <linux/page-flags.h>
 #include <linux/workqueue.h>
 
@@ -26,7 +27,6 @@
 
 // Character Device
 #define DEVICE_NAME "mp3_chardrv"
-#define MAJOR_NUM 212
 
 #define SHARED_BUFFER_SIZE (128 * 4096)
 
@@ -39,8 +39,6 @@
 struct proc_dir_entry* mp3_proc_dir_g;
 struct proc_dir_entry* proc_file_g;
 
-static struct timer_list timer_g;
-
 struct proc_dir_entry* mp3_proc_dir_g;
 static char procfs_buffer[PROCFS_MAX_SIZE]; //buffer used to store character
 
@@ -49,6 +47,7 @@ static ulong procfs_buffer_size_g = 0; //size of buffer
 void* shared_buffer_g;
 ulong shared_buffer_offset_g;
 
+int major_num_g;
 
 static struct workqueue_struct * mp3_workqueue_g;
 struct delayed_work mp3_delayed_job_g;
@@ -81,9 +80,9 @@ void mp3_clear_work_queue(void);
 void mp3_work_queue_function(struct work_struct * work);
 
 // Device driver prototypes
-int device_open(struct inode* inode, struct file* file){return SUCCESS;}
-int device_close(struct inode* inode, struct file* file){return SUCCESS;}
-int device_mmap(struct file* file, struct vm_area_struct* vm_area);
+static int device_open(struct inode* inode, struct file* file){return SUCCESS;}
+static int device_close(struct inode* inode, struct file* file){return SUCCESS;}
+static int device_mmap(struct file* file, struct vm_area_struct* vm_area);
 
 
 /**
@@ -207,22 +206,31 @@ mp3_get_pids(char** pids_string)
     return index;
 }
 
-int device_mmap(struct file* file, struct vm_area_struct* vm_area)
+static int device_mmap(struct file* file, struct vm_area_struct* vm_area)
 {
-    //TODO
+    printk(KERN_INFO "mmap called!\n");
+    void* page_ptr;
+    struct page* page;
+
+    ulong curr_memory_address;
+    ulong vm_end;
+
+    curr_memory_address = vm_area->vm_start;
+    vm_end = vm_area->vm_end;
+
+    page_ptr = shared_buffer_g;
+    page = vmalloc_to_page(page_ptr);
+
+    printk(KERN_INFO "Starting to map memory\n");
+    while(curr_memory_address != vm_end)
+    {
+        vm_insert_page(vm_area, curr_memory_address, page);
+        curr_memory_address += PAGE_SIZE;
+        page_ptr = page_ptr + PAGE_SIZE;
+        page = vmalloc_to_page(page_ptr);
+    }
     printk(KERN_INFO "mmap called!\n");
     return SUCCESS;
-}
-
-void
-timer_handler(ulong data)
-{
-    printk(KERN_INFO "TIMER RUN!!!" );
-
-    //TODO: Timer stuff
-
-    setup_timer(&timer_g, timer_handler, 0);
-    mod_timer(&timer_g, jiffies + msecs_to_jiffies (5000));
 }
 
 /*
@@ -344,12 +352,11 @@ procfile_write(
     int __init
 my_module_init(void)
 {
-    struct file_operations fops = {
+    static struct file_operations fops = {
         .open = device_open,
         .release = device_close,
         .mmap = device_mmap
     };
-    int major_num;
 
     printk(KERN_INFO "MODULE LOADED\n");
 
@@ -378,21 +385,16 @@ my_module_init(void)
     //
     // Character Device Driver
     //
-    major_num = register_chrdev(MAJOR_NUM, DEVICE_NAME, &fops);
-    if(major_num != MAJOR_NUM)
+    major_num_g = register_chrdev(0, DEVICE_NAME, &fops);
+    if(major_num_g < 0)
     {
-        printk(KERN_ALERT "Registering chararacter device failed with %d!\n", major_num);
-        return major_num;
+        printk(KERN_ALERT "Registering chararacter device failed with %d!\n", major_num_g);
+        return major_num_g;
     }
     printk(KERN_INFO "Character device registered!\n");
 
-    //SETUP TIMER
-    setup_timer ( &timer_g, timer_handler, 0);
-    mod_timer ( &timer_g, jiffies + msecs_to_jiffies (5000) );
-
     shared_buffer_g = vzalloc(SHARED_BUFFER_SIZE);
     shared_buffer_offset_g = 0;
-
 
     process_list_size_g = 0;
     mp3_workqueue_g = create_workqueue("mp3_workqueue");
@@ -409,11 +411,10 @@ my_module_exit(void)
     mp3_destroy_process_list();
     destroy_workqueue(mp3_workqueue_g);
 
-    unregister_chrdev(MAJOR_NUM, DEVICE_NAME);
+    unregister_chrdev(major_num_g, DEVICE_NAME);
 
     vfree(shared_buffer_g);
 
-    del_timer ( &timer_g );
     printk(KERN_INFO "MODULE UNLOADED\n");
 }
 
