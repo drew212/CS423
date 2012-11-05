@@ -208,12 +208,13 @@ mp3_get_pids(char** pids_string)
 
 static int device_mmap(struct file* file, struct vm_area_struct* vm_area)
 {
-    printk(KERN_INFO "mmap called!\n");
     void* page_ptr;
     struct page* page;
 
     ulong curr_memory_address;
     ulong vm_end;
+
+    printk(KERN_INFO "mmap called!\n");
 
     curr_memory_address = vm_area->vm_start;
     vm_end = vm_area->vm_end;
@@ -430,9 +431,11 @@ mp3_update_task_data(void)
         task = stored_task_data->linux_task;
 
         stored_task_data->cpu_usage = task->utime;
-        stored_task_data->min += task->min_flt;
-        stored_task_data->maj += task->maj_flt;
-        task->min_flt = task->maj_flt = 0;
+        stored_task_data->min = task->min_flt;
+        stored_task_data->maj = task->maj_flt;
+        task->utime = 0;
+        task->min_flt = 0;
+        task->maj_flt = 0;
     }
     mutex_unlock(&process_list_mutex_g);
 }
@@ -460,7 +463,13 @@ mp3_write_task_stats_to_shared_buffer(void)
         total_min_faults += stored_task_data->min;
         total_maj_faults += stored_task_data->maj;
     }
+
+    if(shared_buffer_offset_g == 0)
+    {
+        debugk(KERN_INFO "%lu \n", jiffies);
+    }
     shared_stats_buffer[shared_buffer_offset_g++] = jiffies;
+
     if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
     {
         shared_buffer_offset_g = 0;
