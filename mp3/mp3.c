@@ -215,6 +215,9 @@ mp3_get_pids(char** pids_string)
     return index;
 }
 
+/*
+ * mmap callback function to map memory into shared user space.
+ */
 static int device_mmap(struct file* file, struct vm_area_struct* vm_area)
 {
     void* page_ptr;
@@ -223,7 +226,7 @@ static int device_mmap(struct file* file, struct vm_area_struct* vm_area)
     ulong curr_memory_address;
     ulong vm_end;
 
-    printk(KERN_INFO "mmap called!\n");
+    debugk(KERN_INFO "mmap called!\n");
 
     curr_memory_address = vm_area->vm_start;
     vm_end = vm_area->vm_end;
@@ -231,7 +234,7 @@ static int device_mmap(struct file* file, struct vm_area_struct* vm_area)
     page_ptr = shared_buffer_g;
     page = vmalloc_to_page(page_ptr);
 
-    printk(KERN_INFO "Starting to map memory\n");
+    debugk(KERN_INFO "Starting to map memory\n");
     while(curr_memory_address != vm_end)
     {
         vm_insert_page(vm_area, curr_memory_address, page);
@@ -283,6 +286,9 @@ procfile_read(
     return ret;
 }
 
+/*
+ * Allows a process to register by writing to the proc file
+ */
 int
 procfile_write(
         struct file *file,
@@ -359,9 +365,13 @@ procfile_write(
     return procfs_buffer_size_g;
 }
 
-    int __init
+/*
+ * Initialize the kernel module
+ */
+int __init
 my_module_init(void)
 {
+    // Struct with callback functions for character device driver
     static struct file_operations fops = {
         .open = device_open,
         .release = device_close,
@@ -412,7 +422,10 @@ my_module_init(void)
     return SUCCESS;
 }
 
-    void __exit
+/*
+ * Cleans up memory related to the module and removes it
+ */
+void __exit
 my_module_exit(void)
 {
     remove_proc_entry(PROCFS_NAME, mp3_proc_dir_g);
@@ -428,8 +441,8 @@ my_module_exit(void)
     printk(KERN_INFO "MODULE UNLOADED\n");
 }
 
-/**
- * Get the counts since the last sample.
+/*
+ * Iterate through the list of tasks and update cpu_time, min/maj page faults
  */
 void
 mp3_update_task_data(void)
