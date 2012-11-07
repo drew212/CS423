@@ -165,6 +165,9 @@ mp3_remove_pid_from_list(int pid)
 
 /*##### WORK QUEUE MANAGEMENT #####*/
 
+/**
+ * Adds a work item to the workqueue to be executed in 1/20th of a second from now.
+ */
 void
 mp3_schedule_delayed_work_queue_job(void)
 {
@@ -173,12 +176,18 @@ mp3_schedule_delayed_work_queue_job(void)
     queue_delayed_work(mp3_workqueue_g, &mp3_delayed_job_g, msecs_to_jiffies(50));
 }
 
+/**
+ * Removes a job from the queue if there is one to remove.
+ */
 void
 mp3_clear_work_queue(void)
 {
     cancel_delayed_work_sync(&mp3_delayed_job_g);
 }
 
+/**
+ * Read the data from the tasks and updates the buffer.  Then reschedules itself.
+ */
 void
 mp3_work_queue_function(struct work_struct * work)
 {
@@ -419,13 +428,19 @@ my_module_exit(void)
     printk(KERN_INFO "MODULE UNLOADED\n");
 }
 
+/**
+ * Get the counts since the last sample.
+ */
 void
 mp3_update_task_data(void)
 {
     struct task_struct * task;
 
     task_struct_t * stored_task_data = NULL;
+
     mutex_lock(&process_list_mutex_g);
+    rcu_read_lock();
+
     list_for_each_entry(stored_task_data, &process_list_g, list_node)
     {
         task = stored_task_data->linux_task;
@@ -437,9 +452,15 @@ mp3_update_task_data(void)
         task->min_flt = 0;
         task->maj_flt = 0;
     }
+
+    rcu_read_unlock();
     mutex_unlock(&process_list_mutex_g);
 }
 
+
+/**
+ * Writes the values recorded in the sample to the shared buffer.
+ */
 void
 mp3_write_task_stats_to_shared_buffer(void)
 {
@@ -464,33 +485,18 @@ mp3_write_task_stats_to_shared_buffer(void)
         total_maj_faults += stored_task_data->maj;
     }
 
-    if(shared_buffer_offset_g == 0)
-    {
-        debugk(KERN_INFO "%lu \n", jiffies);
-    }
     shared_stats_buffer[shared_buffer_offset_g++] = jiffies;
-
-    if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
-    {
-        shared_buffer_offset_g = 0;
-    }
     shared_stats_buffer[shared_buffer_offset_g++] = total_min_faults;
-    if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
-    {
-        shared_buffer_offset_g = 0;
-    }
     shared_stats_buffer[shared_buffer_offset_g++] = total_maj_faults;
-    if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
-    {
-        shared_buffer_offset_g = 0;
-    }
     shared_stats_buffer[shared_buffer_offset_g++] = total_cpu_usage;
+
+    //Since SHARED_BUFFER_SIZE is a multiple of 4*ulong we only need to check this
+    //after the 4 writes to the buffer.
     if(shared_buffer_offset_g >= SHARED_BUFFER_SIZE / (sizeof(ulong) / sizeof(char)))
     {
         shared_buffer_offset_g = 0;
     }
 
-    debugk(KERN_INFO "I would write the stats to the buffer if you implmented me...");
     mutex_unlock(&process_list_mutex_g);
 }
 
