@@ -80,9 +80,9 @@ public class Search {
 
     public static void displayResults(String line){
         String[] entry = line.split("\t");
-        String[] siteList = entry[1].split(":");
+        String[] siteList = entry[1].split(":~:");
         for(int i = 0; i < siteList.length; i++){
-            String[] siteParts = siteList[i].split("-");
+            String[] siteParts = siteList[i].split(":-:");
             System.out.println(siteParts[1] + " " + siteParts[0]);
         }
         //System.out.println(line);

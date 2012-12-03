@@ -39,7 +39,7 @@ public class ParseDump {
                         String[] titleWords = (event.asCharacters().getData()).toLowerCase().split("[^a-z]");
                         for(int i = 0; i < titleWords.length; i++){
                             if(!titleWords[i].trim().equals("")){
-                                System.out.println(title + " : " + titleWords[i].trim());
+                                System.out.println(title + ":~:" + titleWords[i].trim());
                             }
                         }
 
@@ -54,7 +54,7 @@ public class ParseDump {
                             String[] words = (event.asCharacters().getData()).toLowerCase().split("[^a-z]");
                             for(int i = 0; i < words.length; i++){
                                 if(!words[i].trim().equals("")){
-                                    System.out.println(title + " : " + words[i].trim());
+                                    System.out.println(title + ":~:" + words[i].trim());
                                 }
                             }
                         }
