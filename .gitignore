@@ -22,3 +22,6 @@ mp*app
 test
 work
 monitor
+
+*.jar
+*.class
