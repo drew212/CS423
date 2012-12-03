@@ -56,14 +56,12 @@ public class WriteableStringList implements Writable {
         int i;
         StringBuilder sb = new StringBuilder();
         //TOOD: sort(pairs, comparator);
+        Collections.sort(pairs);
         for(i = 0; i < pairs.size()-1; i++) {
             sb.append(pairs.get(i).string + ":-:" + pairs.get(i).value + ":~:");
         }
         if(i != 0) {
             sb.append(pairs.get(i).string + ":-:" + pairs.get(i).value);
-        }
-        else {
-            System.out.println("WritableStringList is empty!");
         }
         return sb.toString();
     }

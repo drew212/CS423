@@ -31,7 +31,6 @@ public class BuildIndex {
 
     public static class RankingMap extends MapReduceBase implements Mapper<LongWritable, Text, Text, WriteableStringList> {
         private Text word = new Text();
-        private Text webCount = new Text();
 
         public void map(LongWritable key, Text value, OutputCollector<Text, WriteableStringList> output, Reporter reporter) throws IOException {
             String line = value.toString();
@@ -40,7 +39,7 @@ public class BuildIndex {
             if(wordCount.length != 2 || tokens.length != 2)
                 System.out.println(line);
             word.set(wordCount[0]);
-            webCount.set(tokens[0] + ":" + wordCount[1]);
+
             WriteableStringList collection = new WriteableStringList();
             collection.add(tokens[0], Integer.parseInt(wordCount[1]));
             output.collect(word, collection);
@@ -49,18 +48,15 @@ public class BuildIndex {
 
     public static class RankingReduce extends MapReduceBase implements Reducer<Text, WriteableStringList, Text, WriteableStringList> {
         public void reduce(Text key, Iterator<WriteableStringList> values, OutputCollector<Text, WriteableStringList> output, Reporter reporter) throws IOException {
-            //WriteableStringList collection = new WriteableStringList();
-            //while (values.hasNext()) {
-            //    WriteableStringList value = values.next();
-            //    for(int i = 0; i < value.size(); i++)
-            //    {
-            //        collection.add(value.get(i).string, value.get(i).value);
-            //    }
-            //}
-            //output.collect(key, collection);
+            WriteableStringList collection = new WriteableStringList();
             while (values.hasNext()) {
-                output.collect(key, values.next());
+                WriteableStringList value = values.next();
+                for(int i = 0; i < value.size(); i++)
+                {
+                    collection.add(value.get(i).string, value.get(i).value);
+                }
             }
+            output.collect(key, collection);
         }
     }
 
