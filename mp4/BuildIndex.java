@@ -29,32 +29,34 @@ public class BuildIndex {
         }
     }
 
-    public static class RankingMap extends MapReduceBase implements Mapper<LongWritable, Text, Text, WriteableStringList> {
+    public static class RankingMap extends MapReduceBase implements Mapper<LongWritable, Text, Text, Text> {
         private Text word = new Text();
+        private Text webCount = new Text();
 
-        public void map(LongWritable key, Text value, OutputCollector<Text, WriteableStringList> output, Reporter reporter) throws IOException {
+        public void map(LongWritable key, Text value, OutputCollector<Text, Text> output, Reporter reporter) throws IOException {
             String line = value.toString();
+            System.out.println("DEBUGGING! " + line);
             String[] tokens = line.split(":~:");
             String[] wordCount = tokens[1].split("\t");
             if(wordCount.length != 2 || tokens.length != 2)
-                System.out.println(line);
+                System.out.println("ERROR in RankingMap.map INPUT!!!");
             word.set(wordCount[0]);
+            webCount.set(tokens[0] + ":-:" + Integer.parseInt(wordCount[1]));
 
-            WriteableStringList collection = new WriteableStringList();
-            collection.add(tokens[0], Integer.parseInt(wordCount[1]));
-            output.collect(word, collection);
+            System.out.println("COLLECTING: " + word.toString() + " and " + webCount.toString());
+            output.collect(word, webCount);
         }
     }
 
-    public static class RankingReduce extends MapReduceBase implements Reducer<Text, WriteableStringList, Text, WriteableStringList> {
-        public void reduce(Text key, Iterator<WriteableStringList> values, OutputCollector<Text, WriteableStringList> output, Reporter reporter) throws IOException {
+    public static class RankingReduce extends MapReduceBase implements Reducer<Text, Text, Text, WriteableStringList> {
+        public void reduce(Text key, Iterator<Text> values, OutputCollector<Text, WriteableStringList> output, Reporter reporter) throws IOException {
             WriteableStringList collection = new WriteableStringList();
             while (values.hasNext()) {
-                WriteableStringList value = values.next();
-                for(int i = 0; i < value.size(); i++)
-                {
-                    collection.add(value.get(i).string, value.get(i).value);
-                }
+                String str = values.next().toString();
+                System.out.println("KEY: " + key.toString());
+                System.out.println("REDUCER STRING B4 SPLIT: " + str);
+                String[] webCount = str.split(":-:");
+                collection.add(webCount[0], Integer.parseInt(webCount[1]));
             }
             output.collect(key, collection);
         }
@@ -86,7 +88,7 @@ public class BuildIndex {
             rankingsConf.setJobName("computeRankings");
 
             rankingsConf.setOutputKeyClass(Text.class);
-            rankingsConf.setOutputValueClass(WriteableStringList.class);
+            rankingsConf.setOutputValueClass(Text.class);
 
             rankingsConf.setMapperClass(RankingMap.class);
             //rankingsConf.setCombinerClass(RankingReduce.class);
