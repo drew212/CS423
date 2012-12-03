@@ -29,75 +29,75 @@ public class BuildIndex {
         }
     }
 
-    public static class RankingMap extends MapReduceBase implements Mapper<LongWritable, Text, Text, WriteableStringList> {
+    public static class RankingMap extends MapReduceBase implements Mapper<LongWritable, Text, Text, Text> {
         private Text word = new Text();
+        private Text webCount = new Text();
 
-        public void map(LongWritable key, Text value, OutputCollector<Text, WriteableStringList> output, Reporter reporter) throws IOException {
+        public void map(LongWritable key, Text value, OutputCollector<Text, Text> output, Reporter reporter) throws IOException {
             String line = value.toString();
             String[] tokens = line.split(":~:");
             String[] wordCount = tokens[1].split("\t");
             if(wordCount.length != 2 || tokens.length != 2)
                 System.out.println(line);
             word.set(wordCount[0]);
+            webCount.set(tokens[0] + ":-:" + wordCount[1]);
 
-            WriteableStringList collection = new WriteableStringList();
-            collection.add(tokens[0], Integer.parseInt(wordCount[1]));
-            output.collect(word, collection);
+            output.collect(word, webCount);
         }
     }
 
-    public static class RankingReduce extends MapReduceBase implements Reducer<Text, WriteableStringList, Text, WriteableStringList> {
-        public void reduce(Text key, Iterator<WriteableStringList> values, OutputCollector<Text, WriteableStringList> output, Reporter reporter) throws IOException {
-            WriteableStringList collection = new WriteableStringList();
+    public static class RankingReduce extends MapReduceBase implements Reducer<Text, Text, Text, Text> {
+        public void reduce(Text key, Iterator<Text> values, OutputCollector<Text, Text> output, Reporter reporter) throws IOException {
+            Text words = new Text();
+
+            String str = values.next().toString();
+            words.set(str);
             while (values.hasNext()) {
-                WriteableStringList value = values.next();
-                for(int i = 0; i < value.size(); i++)
-                {
-                    collection.add(value.get(i).string, value.get(i).value);
-                }
+                str = values.next().toString();
+                words.set(words.toString() + ":~:" + str);
             }
-            output.collect(key, collection);
+            output.collect(key, words);
         }
     }
 
-        public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws Exception {
 
-            // WEIGHTS
-            JobConf weightConf = new JobConf(BuildIndex.class);
-            weightConf.setJobName("computeWeight");
+        // WEIGHTS
+        JobConf weightConf = new JobConf(BuildIndex.class);
+        weightConf.setJobName("computeWeight");
 
-            weightConf.setOutputKeyClass(Text.class);
-            weightConf.setOutputValueClass(IntWritable.class);
+        weightConf.setOutputKeyClass(Text.class);
+        weightConf.setOutputValueClass(IntWritable.class);
 
-            weightConf.setMapperClass(WeightMap.class);
-            weightConf.setCombinerClass(WeightReduce.class);
-            weightConf.setReducerClass(WeightReduce.class);
+        weightConf.setMapperClass(WeightMap.class);
+        weightConf.setCombinerClass(WeightReduce.class);
+        weightConf.setReducerClass(WeightReduce.class);
 
-            weightConf.setInputFormat(TextInputFormat.class);
-            weightConf.setOutputFormat(TextOutputFormat.class);
+        weightConf.setInputFormat(TextInputFormat.class);
+        weightConf.setOutputFormat(TextOutputFormat.class);
 
-            FileInputFormat.setInputPaths(weightConf, new Path("input"));
-            FileOutputFormat.setOutputPath(weightConf, new Path("output/websites"));
+        FileInputFormat.setInputPaths(weightConf, new Path("input"));
+        FileOutputFormat.setOutputPath(weightConf, new Path("output/websites"));
 
-            JobClient.runJob(weightConf);
+        JobClient.runJob(weightConf);
 
-            // Rankings
-            JobConf rankingsConf = new JobConf(BuildIndex.class);
-            rankingsConf.setJobName("computeRankings");
+        // Rankings
+        JobConf rankingsConf = new JobConf(BuildIndex.class);
+        rankingsConf.setJobName("computeRankings");
 
-            rankingsConf.setOutputKeyClass(Text.class);
-            rankingsConf.setOutputValueClass(WriteableStringList.class);
+        rankingsConf.setOutputKeyClass(Text.class);
+        rankingsConf.setOutputValueClass(Text.class);
 
-            rankingsConf.setMapperClass(RankingMap.class);
-            //rankingsConf.setCombinerClass(RankingReduce.class);
-            rankingsConf.setReducerClass(RankingReduce.class);
+        rankingsConf.setMapperClass(RankingMap.class);
+        rankingsConf.setCombinerClass(RankingReduce.class);
+        rankingsConf.setReducerClass(RankingReduce.class);
 
-            rankingsConf.setInputFormat(TextInputFormat.class);
-            rankingsConf.setOutputFormat(TextOutputFormat.class);
+        rankingsConf.setInputFormat(TextInputFormat.class);
+        rankingsConf.setOutputFormat(TextOutputFormat.class);
 
-            FileInputFormat.setInputPaths(rankingsConf, new Path("output/websites"));
-            FileOutputFormat.setOutputPath(rankingsConf, new Path("output/words"));
+        FileInputFormat.setInputPaths(rankingsConf, new Path("output/websites"));
+        FileOutputFormat.setOutputPath(rankingsConf, new Path("output/words"));
 
-            JobClient.runJob(rankingsConf);
-        }
+        JobClient.runJob(rankingsConf);
     }
+}
