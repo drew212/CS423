@@ -2,7 +2,7 @@ HADOOP_HOME=../../hadoop-1.0.4
 
 FILENAME=BuildIndex
 
-include make.settings
+include makesettings
 
 make:
 	javac -classpath $(HADOOP_HOME)/hadoop-core-1.0.4.jar $(FILENAME).java

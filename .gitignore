@@ -25,3 +25,4 @@ monitor
 
 *.jar
 *.class
+*make\.settings
