@@ -7,6 +7,7 @@ import java.util.*;
 import java.io.RandomAccessFile;
 
 public class Search {
+    public static int displayMax = 10;
 
     public static void main(String[] args)
     {
@@ -18,29 +19,47 @@ public class Search {
             System.out.println("No search term specified");
             return;
         }
+        if(args.length == 3){
+            displayMax = Integer.parseInt(args[2]);
+        }
+
+
 
         String index = args[0];
         String needle = args[1].toLowerCase() + "\t";
         try{
             RandomAccessFile wordFile = new RandomAccessFile(index, "r");
-            String firstLine = wordFile.readLine();
-            //System.out.println("Line to test: " + firstLine);
-            if(firstLine.startsWith(needle)){
-                displayResults(firstLine);
-                return;
+            long start = 0;
+            long mid = 0;
+            long end = wordFile.length();
+
+            while(true) {
+                if(start > end) {
+                    System.out.println("Search string not found");
+                    return;
+                }
+
+                mid = (start + end) / 2;
+
+                wordFile.seek(mid);
+                seekToBeginingOfLine(wordFile);
+                long midStart = wordFile.getFilePointer();
+                String line = wordFile.readLine();
+                long midEnd = wordFile.getFilePointer();
+
+                if(line.startsWith(needle)){
+                    //Line found
+                    displayResults(line);
+                    return;
+                }
+                if(line.compareTo(needle) > 0){
+                    start = start;
+                    end = midStart - 1;
+                } else {
+                    start = midEnd;
+                    end = end;
+                }
             }
-
-            seekToBeginingOfLine(wordFile);
-
-            //Begin Binary search
-            String matchingLine = search(wordFile, needle, 0, wordFile.length());
-            if(matchingLine != null){
-                displayResults(matchingLine);
-            } else {
-                System.out.println("Search string not found");
-            }
-
-
         } catch (Exception e){
             System.out.println(e.toString());
         }
@@ -48,71 +67,31 @@ public class Search {
     }
 
     public static void seekToBeginingOfLine(RandomAccessFile file){
-
         try {
-            long startPosition = file.getFilePointer();
+            long seekPosition = file.getFilePointer();
+            if(seekPosition == 0) return;
+
+            char readChar = ' ';
+
+            while ( seekPosition > 0 && readChar != '\n') {
+                //Thread.sleep(1);
+                seekPosition -= 1;
+                file.seek(seekPosition);
+                if(seekPosition == 0)
+                    break;
+                readChar = (char)file.readByte();
+            }
         } catch (Exception e) {
             System.out.println(e.toString());
         }
-
-    }
-
-    public static String search(RandomAccessFile wordFile, String needle, long start, long end){
-        try {
-            if(start > end)
-                return null;
-            wordFile.seek(start);
-
-            String firstLine = wordFile.readLine();
-            if(firstLine.startsWith(needle)){
-                return firstLine;
-            }
-            long newStart = wordFile.getFilePointer();
-
-            long mid = (start + end)/2;
-
-            //System.out.println("New start, mid, end: " + start + ", " + mid + ", " + end);
-
-            wordFile.seek(mid);
-            wordFile.readLine();
-
-            //String candidate = wordFile.readLine();
-            //while (tempMid >= 0 && !candidate.equals("")){
-            //    wordFile.seek(--tempMid);
-            //    candidate = wordFile.readLine();
-            //    //System.out.println("Candidate: " + candidate);
-            //}
-            //wordFile.seek(++tempMid);
-
-            long midStart = wordFile.getFilePointer();
-            String lineToTest = wordFile.readLine();
-            long midEnd = wordFile.getFilePointer();
-
-            //System.out.println("New start, midStart, midEnd, end: " + newStart + ", " + midStart + ", " + midEnd + ", " + end);
-
-            //System.out.println("Line to test: " + lineToTest);
-            if(lineToTest.startsWith(needle)){
-                return lineToTest;
-            } else if (lineToTest.compareTo(needle) > 0){
-                return search(wordFile, needle, newStart, midStart);
-            } else {
-                return search(wordFile, needle, midEnd, end);
-            }
-        } catch (Exception e){
-            System.out.println(e.toString());
-
-        }
-        return null;
     }
 
     public static void displayResults(String line){
         String[] entry = line.split("\t");
         String[] siteList = entry[1].split(":~:");
-        //for(int i = 0; i < siteList.length; i++){
-        for(int i = 0; i < 10; i++){
+        for(int i = 0; i < siteList.length && i < displayMax; i++){
             String[] siteParts = siteList[i].split(":-:");
             System.out.println(siteParts[1] + " " + siteParts[0]);
         }
-        //System.out.println(line);
     }
 }
