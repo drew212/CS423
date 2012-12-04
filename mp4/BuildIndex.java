@@ -35,15 +35,15 @@ public class BuildIndex {
 
         public void map(LongWritable key, Text value, OutputCollector<Text, Text> output, Reporter reporter) throws IOException {
             String line = value.toString();
-            System.out.println("DEBUGGING! " + line);
+            //System.out.println("DEBUGGING! " + line);
             String[] tokens = line.split(":~:");
             String[] wordCount = tokens[1].split("\t");
-            if(wordCount.length != 2 || tokens.length != 2)
-                System.out.println("ERROR in RankingMap.map INPUT!!!");
+            //if(wordCount.length != 2 || tokens.length != 2)
+                //System.out.println("ERROR in RankingMap.map INPUT!!!");
             word.set(wordCount[0]);
             webCount.set(tokens[0] + ":-:" + Integer.parseInt(wordCount[1]));
 
-            System.out.println("COLLECTING: " + word.toString() + " and " + webCount.toString());
+            //System.out.println("COLLECTING: " + word.toString() + " and " + webCount.toString());
             output.collect(word, webCount);
         }
     }
@@ -53,8 +53,8 @@ public class BuildIndex {
             WriteableStringList collection = new WriteableStringList();
             while (values.hasNext()) {
                 String str = values.next().toString();
-                System.out.println("KEY: " + key.toString());
-                System.out.println("REDUCER STRING B4 SPLIT: " + str);
+                //System.out.println("KEY: " + key.toString());
+                //System.out.println("REDUCER STRING B4 SPLIT: " + str);
                 String[] webCount = str.split(":-:");
                 collection.add(webCount[0], Integer.parseInt(webCount[1]));
             }
